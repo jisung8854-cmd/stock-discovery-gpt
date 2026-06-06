@@ -1,3 +1,4 @@
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -25,15 +26,20 @@ class FMPClient:
 
     def __init__(
         self,
-        api_key: str | None,
+        api_key: str | None = None,
         base_url: str = "https://financialmodelingprep.com/api/v3",
         timeout_seconds: float = 15,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
-        self.api_key = api_key
+        self.api_key = (api_key or os.getenv("FMP_API_KEY", "")).strip() or None
         self.base_url = base_url.rstrip("/")
         self.timeout = httpx.Timeout(timeout_seconds)
         self.transport = transport
+
+    @property
+    def is_configured(self) -> bool:
+        """Return whether an FMP API key is available without exposing its value."""
+        return self.api_key is not None
 
     async def get_company_profile(self, ticker: str) -> FMPEndpointResult:
         result = await self._get_list_endpoint(f"/profile/{ticker}")
@@ -105,18 +111,22 @@ class FMPClient:
         except httpx.TimeoutException:
             return FMPEndpointResult(data=None, error=f"FMP timeout for {path}")
         except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in {401, 403}:
+                return FMPEndpointResult(
+                    data=None,
+                    error="FMP authentication failed or endpoint not allowed by plan.",
+                )
             return FMPEndpointResult(
                 data=None,
                 error=f"FMP HTTP {exc.response.status_code} for {path}",
             )
-        except httpx.HTTPError as exc:
-            return FMPEndpointResult(data=None, error=f"FMP network error for {path}: {exc}")
+        except httpx.HTTPError:
+            return FMPEndpointResult(data=None, error=f"FMP network error for {path}")
         except ValueError:
             return FMPEndpointResult(data=None, error=f"FMP returned invalid JSON for {path}")
 
         if isinstance(payload, dict) and self._is_fmp_error_payload(payload):
-            message = payload.get("Error Message") or payload.get("error") or "unknown FMP error"
-            return FMPEndpointResult(data=None, error=f"FMP API error for {path}: {message}")
+            return FMPEndpointResult(data=None, error=f"FMP API error for {path}")
         if isinstance(payload, list):
             return FMPEndpointResult(data=payload)
         if isinstance(payload, dict):

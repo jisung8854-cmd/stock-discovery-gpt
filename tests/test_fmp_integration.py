@@ -164,3 +164,51 @@ class StubFMPClient:
 
     async def get_quote(self, ticker: str) -> FMPEndpointResult:
         return FMPEndpointResult(data=self.quote)
+
+
+def test_fmp_client_reads_api_key_from_environment(monkeypatch: Any) -> None:
+    monkeypatch.setenv("FMP_API_KEY", "  environment-key  ")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["apikey"] == "environment-key"
+        return httpx.Response(200, json=[])
+
+    client = FMPClient(transport=httpx.MockTransport(handler))
+
+    result = asyncio.run(client.get_quote("AAPL"))
+
+    assert client.is_configured is True
+    assert result.ok
+
+
+def test_fmp_client_returns_safe_authentication_note_on_403() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["apikey"] == "secret-test-key"
+        return httpx.Response(403, json={"Error Message": "Forbidden"})
+
+    client = FMPClient(api_key="secret-test-key", transport=httpx.MockTransport(handler))
+
+    result = asyncio.run(client.get_quote("AAPL"))
+
+    assert result.error == "FMP authentication failed or endpoint not allowed by plan."
+    assert "secret-test-key" not in str(result.error)
+
+
+def test_us_score_deduplicates_fmp_403_authentication_notes() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, json={"Error Message": "Forbidden"})
+
+    service = ScreenerService(
+        settings=Settings(fmp_api_key="secret-test-key"),
+        fmp_client=FMPClient(
+            api_key="secret-test-key",
+            transport=httpx.MockTransport(handler),
+        ),
+    )
+
+    response = asyncio.run(service.score_stock(Market.NASDAQ, "AAPL"))
+
+    assert response.data_basis.notes == [
+        "FMP authentication failed or endpoint not allowed by plan."
+    ]
+    assert "secret-test-key" not in response.model_dump_json()
