@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: stock-discovery-gpt-api
+    runtime: python
+    buildCommand: pip install -e .
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: FMP_API_KEY
+        sync: false
+      - key: DART_API_KEY
+        sync: false
+      - key: ACTION_API_BEARER_TOKEN
+        sync: false
