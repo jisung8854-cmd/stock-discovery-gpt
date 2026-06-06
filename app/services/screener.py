@@ -110,7 +110,7 @@ class ScreenerService:
             ratios_result,
             quote_result,
         ]
-        notes = [result.error for result in results if result.error]
+        notes = list(dict.fromkeys(result.error for result in results if result.error))
         reliability = self._data_reliability(results)
 
         profile = _dict_data(profile_result)

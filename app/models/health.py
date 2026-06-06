@@ -17,3 +17,9 @@ class HealthResponse(BaseModel):
             ]
         }
     )
+
+
+class FMPHealthResponse(BaseModel):
+    status: str
+    configured: bool
+    message: str
