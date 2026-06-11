@@ -66,3 +66,58 @@ def normalize_dart_company(
         industry=None,
         market_cap=None,
     )
+
+
+def normalize_gateway_company(
+    raw: dict[str, Any] | None,
+    market: Market,
+    ticker: str,
+) -> CompanySummary:
+    """Normalize common gateway snapshot/DART profile shapes."""
+    raw = raw or {}
+    payload = raw.get("data") if isinstance(raw.get("data"), dict) else raw
+    company = _nested_dict(payload, "company", "profile")
+    quote = _nested_dict(payload, "quote", "market_data", "snapshot")
+    sources = (company, quote, payload, raw)
+    normalized_ticker = _first_value(*sources, keys=("ticker", "symbol", "stock_code")) or ticker
+    market_cap = _first_number(*sources, keys=("market_cap", "marketCap", "mktCap"))
+    price = _first_number(*sources, keys=("price", "current_price", "currentPrice"))
+    return CompanySummary(
+        ticker=str(normalized_ticker).upper(),
+        market=market,
+        name=str(
+            _first_value(*sources, keys=("name", "company_name", "companyName", "corp_name"))
+            or normalized_ticker
+        ),
+        sector=_optional_string(_first_value(*sources, keys=("sector",))),
+        industry=_optional_string(_first_value(*sources, keys=("industry",))),
+        market_cap=market_cap,
+        price=price,
+        currency=_optional_string(_first_value(*sources, keys=("currency",))),
+    )
+
+
+def resolved_stock_code(raw: Any, fallback: str) -> str:
+    if isinstance(raw, list) and raw:
+        raw = raw[0]
+    if not isinstance(raw, dict):
+        return fallback
+    nested = _nested_dict(raw, "result", "company", "data")
+    value = _first_value(nested, raw, keys=("stock_code", "ticker", "symbol", "code"))
+    return str(value or fallback).zfill(6)
+
+
+def _nested_dict(raw: dict[str, Any], *keys: str) -> dict[str, Any]:
+    for key in keys:
+        value = raw.get(key)
+        if isinstance(value, dict):
+            return value
+    return {}
+
+
+def _first_value(*sources: dict[str, Any], keys: tuple[str, ...]) -> Any:
+    for source in sources:
+        for key in keys:
+            if source.get(key) not in (None, ""):
+                return source[key]
+    return None

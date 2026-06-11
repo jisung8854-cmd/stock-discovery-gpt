@@ -53,7 +53,7 @@ API 문서 확인:
 
 ## 환경 변수
 
-`.env.example`을 복사하여 `.env`를 만들고 값을 채웁니다. MVP 단계에서는 값을 비워도 mock 응답을 사용할 수 있습니다. 단, 미국 상장 종목(`NASDAQ`, `NYSE`, `AMEX`)의 `/score/{market}/{ticker}`는 `FMP_API_KEY`가 설정된 경우 FMP 데이터를 조회하고, 한국 상장 종목(`KOSPI`, `KOSDAQ`)은 `DART_API_KEY`가 설정된 경우 DART 데이터를 조회합니다. 키가 없으면 mock 응답으로 폴백합니다.
+`.env.example`을 복사하여 `.env`를 만들고 값을 채웁니다. `/score/{market}/{ticker}`는 `STOCK_DATA_GATEWAY_URL`의 gateway를 통해 미국 FMP snapshot 또는 한국 DART/KRX 데이터를 조회합니다. gateway가 없거나 상세 데이터가 부족하면 기존 응답 스키마를 유지한 partial fallback을 반환합니다.
 
 | 변수 | 설명 |
 | --- | --- |
@@ -101,7 +101,7 @@ Render 및 브라우저 확인용 공개 루트 엔드포인트입니다. 앱 �
 
 ### `POST /score/{market}/{ticker}`
 
-단일 종목에 대한 스코어 응답을 반환합니다. 미국 상장 종목은 `FMP_API_KEY`가 있을 때 FMP 데이터를 사용하고, 한국 상장 종목은 `DART_API_KEY`가 있을 때 DART 데이터를 사용합니다. API 키가 없거나 아직 연동되지 않은 시장은 mock 데이터를 사용합니다.
+단일 종목에 대한 스코어 응답을 반환합니다. 미국 시장은 gateway의 `/v1/market-snapshot`을 호출하고, 한국 시장은 필요할 때 `/kr/resolve`로 종목 코드를 확인한 뒤 `/kr/dart/company`와 `/kr/dart/disclosures`를 호출합니다. gateway 장애나 상세 재무 데이터 누락 시 partial fallback과 낮아진 데이터 신뢰도를 반환합니다.
 
 - `market`: `NASDAQ`, `NYSE`, `AMEX`, `KOSPI`, `KOSDAQ`
 - `ticker`: 미국 티커 또는 한국 종목 코드
@@ -115,6 +115,29 @@ Render 및 브라우저 확인용 공개 루트 엔드포인트입니다. 앱 �
 ### `GET /candidates/top`
 
 선택적 시장 필터와 limit을 받아 mock 상위 후보를 반환합니다.
+
+## 데이터 게이트웨이 아키텍처
+
+```text
+Custom GPT
+→ stock-discovery-gpt
+→ stock-data-gateway
+→ FMP / DART / KRX
+```
+
+`stock-data-gateway`는 외부 공급자의 raw data collection layer이며, 이 서비스는 정규화된 데이터를 사용해 scoring과 candidate ranking을 수행합니다. `STOCK_DATA_GATEWAY_URL`의 기본값은 `https://stock-data-gateway.onrender.com`입니다.
+
+`/score/{market}/{ticker}` 테스트 예시:
+
+```bash
+curl -X POST https://<your-render-service>.onrender.com/score/NASDAQ/AAPL \
+  -H "Authorization: Bearer <ACTION_API_BEARER_TOKEN>"
+
+curl -X POST https://<your-render-service>.onrender.com/score/KOSPI/005930 \
+  -H "Authorization: Bearer <ACTION_API_BEARER_TOKEN>"
+```
+
+게이트웨이가 일시적으로 응답하지 않거나 상세 재무 데이터가 없으면 API는 기존 응답 스키마를 유지한 partial result를 반환하고, `data_basis.reliability`와 `risk_flags`로 데이터 한계를 표시합니다.
 
 ## Custom GPT Actions 연결 방식
 
@@ -180,8 +203,9 @@ Render는 `PORT` 환경 변수를 자동으로 주입합니다. 위 명령은 �
 2. **New Web Service** 또는 Blueprint 배포를 선택합니다.
 3. Runtime은 Python 3.11 이상을 사용합니다.
 4. Build Command와 Start Command가 위 값과 일치하는지 확인합니다.
-5. Health Check Path를 `/health`로 설정합니다.
-6. 배포 후 다음 URL이 정상 응답하는지 확인합니다.
+5. **Environment** 탭에 `STOCK_DATA_GATEWAY_URL=https://stock-data-gateway.onrender.com`을 설정합니다.
+6. Health Check Path를 `/health`로 설정합니다.
+7. 배포 후 다음 URL이 정상 응답하는지 확인합니다.
 
 - `https://<your-render-service>.onrender.com/`
 - `https://<your-render-service>.onrender.com/health`
@@ -194,8 +218,9 @@ Render 대시보드의 **Environment** 탭에서 다음 값을 설정합니다.
 | 변수 | 필수 여부 | 설명 |
 | --- | --- | --- |
 | `ENVIRONMENT` | 권장 | `production` 등 배포 환경 이름 |
-| `FMP_API_KEY` | 선택 | 미국 주식 FMP 데이터 연동용 키. 없으면 미국 종목은 mock fallback 사용 |
-| `DART_API_KEY` | 선택 | 한국 주식 DART 데이터 연동용 키. 없으면 한국 종목은 mock fallback 사용 |
+| `STOCK_DATA_GATEWAY_URL` | 권장 | raw data gateway URL. 기본값은 `https://stock-data-gateway.onrender.com` |
+| `FMP_API_KEY` | 선택 | 기존 직접 FMP client용 키. gateway 연동 `/score`에서는 사용하지 않음 |
+| `DART_API_KEY` | 선택 | 기존 직접 DART client용 키. gateway 연동 `/score`에서는 사용하지 않음 |
 | `ACTION_API_BEARER_TOKEN` | 권장 | Custom GPT Actions에서 보호 엔드포인트 호출 시 사용할 Bearer 토큰 |
 | `PORT` | Render 자동 설정 | Render가 자동 주입합니다. 직접 설정하지 않아도 됩니다. |
 

@@ -10,3 +10,5 @@ class CompanySummary(BaseModel):
     sector: str | None = None
     industry: str | None = None
     market_cap: float | None = Field(default=None, ge=0)
+    price: float | None = Field(default=None, ge=0)
+    currency: str | None = None
