@@ -140,6 +140,44 @@ curl -X POST https://<your-render-service>.onrender.com/score/KOSPI/005930 \
 
 게이트웨이가 일시적으로 응답하지 않거나 상세 재무 데이터가 없으면 API는 기존 응답 스키마를 유지한 partial result를 반환하고, `data_basis.reliability`와 `risk_flags`로 데이터 한계를 표시합니다.
 
+## Screening 결과 해석
+
+`screenStocks`와 `getTopCandidates`의 `market_cap` 및 `min_market_cap`은 상장 시장의 통화를 기준으로 해석합니다. 통화 변환은 자동으로 수행하지 않습니다.
+
+- `NASDAQ`, `NYSE`, `AMEX`: `market_cap`과 `min_market_cap` 단위는 **USD**입니다.
+- `KOSPI`, `KOSDAQ`: `market_cap`과 `min_market_cap` 단위는 **KRW**입니다.
+- 시가총액을 확인할 수 없으면 `market_cap=null`로 반환합니다. `min_market_cap=0`이면 해당 후보를 자동 제외하지 않지만, 양수 필터는 확인 가능한 시가총액을 요구하므로 제외합니다.
+
+후보 응답 메타데이터는 다음과 같이 해석합니다.
+
+- `is_mock`: 실제 공급자 데이터가 아닌 mock/fallback 후보이면 `true`입니다.
+- `data_reliability`: `0`에서 `1` 사이의 수치 신뢰도입니다. `0.5` 미만인 후보는 `elite_candidate`가 될 수 없습니다.
+- `data_reliability_label`: 사람이 읽기 쉬운 신뢰도 등급입니다. fallback 후보는 `low`입니다.
+- `data_source`: 후보 데이터의 출처입니다.
+- `market_cap_unit`: 후보 시가총액의 통화 단위인 `USD` 또는 `KRW`입니다.
+- `risk_flags`: `mock_data_used`, `partial_gateway_data`, `gateway_unavailable`, `dart_data_unavailable` 등 데이터 한계와 리스크를 표시합니다.
+- `notes`: 오류 세부정보나 내부 URL을 노출하지 않는 안전한 설명입니다.
+
+mock/fallback 후보는 시장 발굴 흐름을 중단하지 않기 위한 참고 결과입니다. 실제 데이터로 오해하지 말고 현재 시세와 재무 데이터를 별도로 확인해야 합니다.
+
+### `screenStocks` 사용 예시
+
+```bash
+curl -X POST https://<your-render-service>.onrender.com/screen \
+  -H "Authorization: Bearer <ACTION_API_BEARER_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"market":"KOSPI","min_market_cap":0,"min_total_score":60,"limit":10}'
+```
+
+### `getTopCandidates` 사용 예시
+
+```bash
+curl "https://<your-render-service>.onrender.com/candidates/top?market=NASDAQ&limit=5" \
+  -H "Authorization: Bearer <ACTION_API_BEARER_TOKEN>"
+```
+
+게이트웨이 또는 공급자 오류가 발생하면 endpoint는 crash 대신 빈 목록 또는 명시적으로 표시된 fallback 후보를 반환합니다. fallback 후보의 `risk_flags`와 `notes`에는 민감정보 없이 안전한 상태만 기록됩니다.
+
 ## Custom GPT Actions 연결 방식
 
 1. FastAPI 앱을 배포하고 HTTPS 엔드포인트를 준비합니다.
