@@ -57,8 +57,9 @@ API 문서 확인:
 
 | 변수 | 설명 |
 | --- | --- |
-| `FMP_API_KEY` | FMP 미국 주식 데이터 API 키. 설정 시 미국 종목 스코어링에서 회사 프로필, 손익계산서, 재무상태표, 현금흐름표, key metrics, ratios, quote를 조회합니다. |
-| `DART_API_KEY` | DART 한국 공시 데이터 API 키. 설정 시 KOSPI/KOSDAQ 종목 스코어링에서 고유번호, 기업개황, 단일회사 주요계정, 최근 공시를 조회합니다. |
+| `STOCK_DATA_GATEWAY_URL` | `/score/{market}/{ticker}`가 호출하는 데이터 게이트웨이 URL. 미설정 시 `https://stock-data-gateway.onrender.com`을 사용합니다. |
+| `FMP_API_KEY` | 기존 직접 FMP 클라이언트를 사용하는 서비스용 선택 설정. `/score`는 게이트웨이를 통해 FMP 데이터를 조회합니다. |
+| `DART_API_KEY` | 기존 직접 DART 클라이언트를 사용하는 서비스용 선택 설정. `/score`는 게이트웨이를 통해 DART/KRX 데이터를 조회합니다. |
 | `ACTION_API_BEARER_TOKEN` | Custom GPT Action 호출 보호용 Bearer 토큰 |
 | `ENVIRONMENT` | 실행 환경. 기본값은 `development` |
 
@@ -66,7 +67,7 @@ API 문서 확인:
 
 ## FMP 미국 주식 데이터 설정
 
-미국 상장 종목(`NASDAQ`, `NYSE`, `AMEX`)은 `FMP_API_KEY`가 있을 때 Financial Modeling Prep API를 사용합니다. 현재 연동되는 FMP 엔드포인트는 다음과 같습니다.
+기존 직접 FMP 클라이언트는 `FMP_API_KEY`가 있을 때 Financial Modeling Prep API를 사용합니다. `/score`의 미국 상장 종목(`NASDAQ`, `NYSE`, `AMEX`) 요청은 API 키를 scoring backend에 노출하지 않고 stock-data-gateway의 `/v1/market-snapshot`을 사용합니다. 현재 연동되는 FMP 엔드포인트는 다음과 같습니다.
 
 - `profile/{ticker}`
 - `income-statement/{ticker}`
@@ -80,7 +81,7 @@ API 문서 확인:
 
 ## DART 한국 주식 데이터 설정
 
-한국 상장 종목(`KOSPI`, `KOSDAQ`)은 `DART_API_KEY`가 있을 때 OpenDART API를 사용합니다. 티커는 `005930`, `083450`처럼 6자리 종목코드를 입력합니다. 현재 연동되는 DART 엔드포인트는 다음과 같습니다.
+기존 직접 DART 클라이언트는 `DART_API_KEY`가 있을 때 OpenDART API를 사용합니다. `/score`의 한국 상장 종목(`KOSPI`, `KOSDAQ`) 요청은 stock-data-gateway의 `/kr/resolve`, `/kr/dart/company`, `/kr/dart/disclosures`를 필요한 범위에서 사용합니다. 티커는 `005930`, `083450`처럼 6자리 종목코드를 입력합니다. 현재 연동되는 DART 엔드포인트는 다음과 같습니다.
 
 - `corpCode.xml`
 - `company.json`
@@ -101,7 +102,7 @@ Render 및 브라우저 확인용 공개 루트 엔드포인트입니다. 앱 �
 
 ### `POST /score/{market}/{ticker}`
 
-단일 종목에 대한 스코어 응답을 반환합니다. 미국 시장은 gateway의 `/v1/market-snapshot`을 호출하고, 한국 시장은 필요할 때 `/kr/resolve`로 종목 코드를 확인한 뒤 `/kr/dart/company`와 `/kr/dart/disclosures`를 호출합니다. gateway 장애나 상세 재무 데이터 누락 시 partial fallback과 낮아진 데이터 신뢰도를 반환합니다.
+단일 종목에 대한 스코어 응답을 반환합니다. 미국 시장은 gateway의 `/v1/market-snapshot`을 호출하고, 한국 시장은 필요할 때 `/kr/resolve`로 종목 코드를 확인한 뒤 `/kr/dart/company`와 `/kr/dart/disclosures`를 호출합니다. gateway 장애나 상세 재무 데이터 누락 시 값을 만들어내지 않고 partial result와 낮아진 데이터 신뢰도를 반환합니다.
 
 - `market`: `NASDAQ`, `NYSE`, `AMEX`, `KOSPI`, `KOSDAQ`
 - `ticker`: 미국 티커 또는 한국 종목 코드
@@ -138,6 +139,44 @@ curl -X POST https://<your-render-service>.onrender.com/score/KOSPI/005930 \
 ```
 
 게이트웨이가 일시적으로 응답하지 않거나 상세 재무 데이터가 없으면 API는 기존 응답 스키마를 유지한 partial result를 반환하고, `data_basis.reliability`와 `risk_flags`로 데이터 한계를 표시합니다.
+
+## Screening 결과 해석
+
+`screenStocks`와 `getTopCandidates`의 `market_cap` 및 `min_market_cap`은 상장 시장의 통화를 기준으로 해석합니다. 통화 변환은 자동으로 수행하지 않습니다.
+
+- `NASDAQ`, `NYSE`, `AMEX`: `market_cap`과 `min_market_cap` 단위는 **USD**입니다.
+- `KOSPI`, `KOSDAQ`: `market_cap`과 `min_market_cap` 단위는 **KRW**입니다.
+- 시가총액을 확인할 수 없으면 `market_cap=null`로 반환합니다. `min_market_cap=0`이면 해당 후보를 자동 제외하지 않지만, 양수 필터는 확인 가능한 시가총액을 요구하므로 제외합니다.
+
+후보 응답 메타데이터는 다음과 같이 해석합니다.
+
+- `is_mock`: 실제 공급자 데이터가 아닌 mock/fallback 후보이면 `true`입니다.
+- `data_reliability`: `0`에서 `1` 사이의 수치 신뢰도입니다. `0.5` 미만인 후보는 `elite_candidate`가 될 수 없습니다.
+- `data_reliability_label`: 사람이 읽기 쉬운 신뢰도 등급입니다. fallback 후보는 `low`입니다.
+- `data_source`: 후보 데이터의 출처입니다.
+- `market_cap_unit`: 후보 시가총액의 통화 단위인 `USD` 또는 `KRW`입니다.
+- `risk_flags`: `mock_data_used`, `partial_gateway_data`, `gateway_unavailable`, `dart_data_unavailable` 등 데이터 한계와 리스크를 표시합니다.
+- `notes`: 오류 세부정보나 내부 URL을 노출하지 않는 안전한 설명입니다.
+
+mock/fallback 후보는 시장 발굴 흐름을 중단하지 않기 위한 참고 결과입니다. 실제 데이터로 오해하지 말고 현재 시세와 재무 데이터를 별도로 확인해야 합니다.
+
+### `screenStocks` 사용 예시
+
+```bash
+curl -X POST https://<your-render-service>.onrender.com/screen \
+  -H "Authorization: Bearer <ACTION_API_BEARER_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"market":"KOSPI","min_market_cap":0,"min_total_score":60,"limit":10}'
+```
+
+### `getTopCandidates` 사용 예시
+
+```bash
+curl "https://<your-render-service>.onrender.com/candidates/top?market=NASDAQ&limit=5" \
+  -H "Authorization: Bearer <ACTION_API_BEARER_TOKEN>"
+```
+
+게이트웨이 또는 공급자 오류가 발생하면 endpoint는 crash 대신 빈 목록 또는 명시적으로 표시된 fallback 후보를 반환합니다. fallback 후보의 `risk_flags`와 `notes`에는 민감정보 없이 안전한 상태만 기록됩니다.
 
 ## Custom GPT Actions 연결 방식
 

@@ -110,7 +110,15 @@ class ScoreResponse(BaseModel):
 
 class ScreenRequest(BaseModel):
     market: Market = Field(description="Market to screen.")
-    min_market_cap: float = Field(default=0, ge=0, description="Minimum market capitalization.")
+    min_market_cap: float = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Minimum market capitalization. Interpreted as USD for NASDAQ/NYSE/AMEX and "
+            "KRW for KOSPI/KOSDAQ. Candidates with unavailable market cap remain eligible "
+            "when this value is 0."
+        ),
+    )
     min_total_score: float = Field(default=0, ge=0, le=100, description="Minimum total score.")
     limit: int = Field(default=10, ge=1, le=100, description="Maximum number of results.")
 
@@ -140,6 +148,12 @@ class Candidate(BaseModel):
     EES: float = Field(ge=0, le=100)
     data_reliability: float = Field(ge=0, le=1)
     final_label: FinalLabel
+    is_mock: bool | None = None
+    data_source: str | None = None
+    data_reliability_label: str | None = None
+    market_cap_unit: str | None = None
+    risk_flags: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -154,8 +168,14 @@ class Candidate(BaseModel):
                     "PAS": 74.0,
                     "VDS": 88.4,
                     "EES": 89.0,
-                    "data_reliability": 0.5,
+                    "data_reliability": 0.9,
                     "final_label": "elite_candidate",
+                    "is_mock": False,
+                    "data_source": "gateway",
+                    "data_reliability_label": "high",
+                    "market_cap_unit": "USD",
+                    "risk_flags": [],
+                    "notes": [],
                 }
             ]
         }
@@ -166,6 +186,8 @@ class ScreenResponse(BaseModel):
     market: Market
     candidates: list[Candidate]
     count: int
+    risk_flags: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
 
 
 class TopCandidatesResponse(RootModel[list[Candidate]]):

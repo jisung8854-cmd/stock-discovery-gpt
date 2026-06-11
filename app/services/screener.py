@@ -25,7 +25,6 @@ KOREAN_MARKETS = {Market.KOSPI, Market.KOSDAQ}
 DART_ANNUAL_REPORT_CODE = "11011"
 
 
-
 class ScreenerService:
     def __init__(
         self,
@@ -160,7 +159,6 @@ class ScreenerService:
             final_label=final_label,
         )
 
-
     async def _score_korean_stock_with_dart(self, market: Market, ticker: str) -> ScoreResponse:
         normalized_ticker = ticker.zfill(6)
         statement_year = date.today().year - 1
@@ -216,29 +214,55 @@ class ScreenerService:
         )
 
     def screen(self, request: ScreenRequest) -> ScreenResponse:
-        candidates = self._mock_candidates(request.market)
+        return self.fallback_screen(request)
+
+    def fallback_screen(
+        self, request: ScreenRequest, gateway_unavailable: bool = False
+    ) -> ScreenResponse:
+        candidates = self.fallback_candidates(
+            market=request.market,
+            limit=request.limit,
+            gateway_unavailable=gateway_unavailable,
+        )
         filtered = [
             candidate
             for candidate in candidates
-            if (candidate.market_cap or 0) >= request.min_market_cap
+            if _market_cap_matches(candidate.market_cap, request.min_market_cap)
             and candidate.total_score >= request.min_total_score
         ]
-        sorted_candidates = sorted(
-            filtered, key=lambda candidate: candidate.total_score, reverse=True
+        flags = ["partial_gateway_data", "mock_data_used"]
+        notes = ["Fallback screening data was used; verify candidates before relying on rankings."]
+        if gateway_unavailable:
+            flags.insert(0, "gateway_unavailable")
+            notes = [
+                "Candidate data provider is temporarily unavailable; safe fallback data returned."
+            ]
+        return ScreenResponse(
+            market=request.market,
+            candidates=filtered,
+            count=len(filtered),
+            risk_flags=flags,
+            notes=notes,
         )
-        limited = sorted_candidates[: request.limit]
-        return ScreenResponse(market=request.market, candidates=limited, count=len(limited))
 
     def top_candidates(self, market: Market | None = None, limit: int = 10) -> list[Candidate]:
+        return self.fallback_candidates(market=market, limit=limit)
+
+    def fallback_candidates(
+        self,
+        market: Market | None = None,
+        limit: int = 10,
+        gateway_unavailable: bool = False,
+    ) -> list[Candidate]:
         markets = [market] if market else list(Market)
         candidates: list[Candidate] = []
         for candidate_market in markets:
-            candidates.extend(self._mock_candidates(candidate_market))
+            candidates.extend(
+                self._mock_candidates(candidate_market, gateway_unavailable=gateway_unavailable)
+            )
         return sorted(candidates, key=lambda candidate: candidate.total_score, reverse=True)[:limit]
 
-    def _data_reliability(
-        self, results: list[FMPEndpointResult | DARTEndpointResult]
-    ) -> float:
+    def _data_reliability(self, results: list[FMPEndpointResult | DARTEndpointResult]) -> float:
         if not results:
             return 0
         successful = sum(1 for result in results if result.ok and result.data not in (None, [], {}))
@@ -263,9 +287,7 @@ class ScreenerService:
             management_capital_allocation_score=_blend_with_reliability(
                 modules.management_capital_allocation_score, reliability_floor
             ),
-            buffett_fit_score=_blend_with_reliability(
-                modules.buffett_fit_score, reliability_floor
-            ),
+            buffett_fit_score=_blend_with_reliability(modules.buffett_fit_score, reliability_floor),
             price_attractiveness_score=_blend_with_reliability(
                 modules.price_attractiveness_score, reliability_floor
             ),
@@ -295,7 +317,6 @@ class ScreenerService:
             flags.append("high_pe_ratio")
         return flags
 
-
     def _dart_filing_risk_flags(self, filings: list[dict[str, Any]]) -> list[str]:
         patterns: dict[str, tuple[str, ...]] = {
             "paid_in_capital_increase": ("유상증자", "증자결정"),
@@ -313,7 +334,9 @@ class ScreenerService:
                     flags.append(flag)
         return flags
 
-    def _mock_candidates(self, market: Market) -> list[Candidate]:
+    def _mock_candidates(
+        self, market: Market, gateway_unavailable: bool = False
+    ) -> list[Candidate]:
         tickers_by_market: dict[Market, list[tuple[str, str]]] = {
             Market.NASDAQ: [("MSFT", "Microsoft"), ("NVDA", "NVIDIA"), ("ADBE", "Adobe")],
             Market.NYSE: [("BRK.B", "Berkshire Hathaway"), ("V", "Visa"), ("MA", "Mastercard")],
@@ -352,6 +375,8 @@ class ScreenerService:
                 scores.BQS,
                 scores.PAS,
                 hard_fail=False,
+                data_reliability=0.25,
+                price_attractiveness_score=modules.price_attractiveness_score,
             )
             company = CompanySummary(
                 ticker=ticker,
@@ -359,7 +384,7 @@ class ScreenerService:
                 name=name,
                 sector="Mock Sector",
                 industry="Mock Industry",
-                market_cap=100_000_000_000 / (index + 1),
+                market_cap=None,
             )
             candidates.append(
                 Candidate(
@@ -372,8 +397,19 @@ class ScreenerService:
                     PAS=scores.PAS,
                     VDS=scores.VDS,
                     EES=scores.EES,
-                    data_reliability=0.5,
+                    data_reliability=0.25,
                     final_label=final_label,
+                    is_mock=True,
+                    data_source="mock",
+                    data_reliability_label="low",
+                    market_cap_unit=_market_cap_unit(market),
+                    risk_flags=_fallback_risk_flags(market, gateway_unavailable),
+                    notes=[
+                        "Candidate data provider is temporarily unavailable; "
+                        "safe fallback data returned."
+                        if gateway_unavailable
+                        else "Fallback candidate data; verify with current market data."
+                    ],
                 )
             )
         return candidates
@@ -409,3 +445,22 @@ def _score_inverse(value: float | None, excellent: float, poor: float) -> float:
 
 def _blend_with_reliability(score: float, reliability_floor: float) -> float:
     return round((score * 0.8) + (reliability_floor * 0.2), 2)
+
+
+def _market_cap_unit(market: Market) -> str:
+    return "USD" if market in US_MARKETS else "KRW"
+
+
+def _market_cap_matches(market_cap: float | None, minimum: float) -> bool:
+    if market_cap is None:
+        return minimum == 0
+    return market_cap >= minimum
+
+
+def _fallback_risk_flags(market: Market, gateway_unavailable: bool) -> list[str]:
+    flags = ["partial_gateway_data", "mock_data_used"]
+    if market in KOREAN_MARKETS:
+        flags.append("dart_data_unavailable")
+    if gateway_unavailable:
+        flags.insert(0, "gateway_unavailable")
+    return flags

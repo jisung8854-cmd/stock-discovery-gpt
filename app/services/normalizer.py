@@ -54,7 +54,7 @@ def normalize_dart_company(
 ) -> CompanySummary:
     overview = overview or {}
     normalized_stock_code = str(
-        overview.get("stock_code") or overview.get("stock_code") or stock_code
+        overview.get("stock_code") or overview.get("ticker") or stock_code
     ).zfill(6)
     return CompanySummary(
         ticker=normalized_stock_code,

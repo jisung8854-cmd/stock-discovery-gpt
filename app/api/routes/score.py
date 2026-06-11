@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Path
 
 from app.core.config import get_settings
 from app.core.security import verify_action_bearer_token
-from app.models.common import DataBasis, Market
+from app.models.common import DataBasis, FinalLabel, Market
 from app.models.scoring import ScoreResponse
 from app.services.gateway_client import GatewayClient, GatewayResult
 from app.services.metrics_calculator import calculate_gateway_metrics
@@ -50,7 +50,7 @@ async def score_stock(
 
 
 async def _score_korean_stock(client: GatewayClient, market: Market, ticker: str) -> ScoreResponse:
-    resolve_result = GatewayResult(data={"stock_code": ticker})
+    resolve_result: GatewayResult | None = None
     stock_code = ticker
     if not (ticker.isdigit() and len(ticker) == 6):
         resolve_result = await client.resolve_korean_ticker(ticker)
@@ -60,17 +60,22 @@ async def _score_korean_stock(client: GatewayClient, market: Market, ticker: str
         client.get_dart_company_profile(stock_code),
         client.get_dart_disclosures(stock_code),
     )
-    successful_data = company_result.data if isinstance(company_result.data, dict) else {}
-    results = (resolve_result, company_result, disclosures_result)
+    results = [company_result, disclosures_result]
+    if resolve_result is not None:
+        results.append(resolve_result)
     failures = [result for result in results if not result.ok]
-    extra_flags = _disclosure_risk_flags(disclosures_result.data)
+    successful_results = [result for result in results if result.ok]
+    company_data = company_result.data if isinstance(company_result.data, dict) else {}
     return _build_gateway_score(
         market,
         stock_code,
-        GatewayResult(data=successful_data, error=company_result.error),
+        GatewayResult(
+            data=company_data,
+            error="stock-data-gateway unavailable" if not successful_results else None,
+        ),
         provider_flag="dart_data_unavailable",
         endpoint_failures=len(failures),
-        extra_flags=extra_flags,
+        extra_flags=_disclosure_risk_flags(disclosures_result.data),
     )
 
 
@@ -84,7 +89,7 @@ def _build_gateway_score(
 ) -> ScoreResponse:
     raw = result.data if isinstance(result.data, dict) else {}
     company = normalize_gateway_company(raw, market, ticker)
-    metrics, valuation, has_financials = calculate_gateway_metrics(raw)
+    metrics, valuation, has_financial_metrics, has_valuation = calculate_gateway_metrics(raw)
     risk_flags = list(extra_flags or [])
     notes: list[str] = []
 
@@ -98,15 +103,23 @@ def _build_gateway_score(
             risk_flags.extend(["partial_gateway_data", provider_flag])
             notes.append(f"{endpoint_failures} stock-data-gateway endpoint(s) unavailable.")
             reliability -= min(endpoint_failures * 0.2, 0.4)
-        if not has_financials:
-            risk_flags.append("partial_gateway_data")
-            notes.append("Detailed financials unavailable; deterministic fallback metrics used.")
+        if not has_financial_metrics:
+            risk_flags.extend(["partial_gateway_data", "financial_metrics_missing"])
+            notes.append("Detailed financial metrics are unavailable.")
+            reliability = min(reliability, 0.45)
+        if not has_valuation:
+            risk_flags.extend(["partial_gateway_data", "valuation_data_missing"])
+            notes.append("Valuation data is unavailable.")
             reliability = min(reliability, 0.45)
 
+    if reliability < 0.5:
+        risk_flags.append("low_data_reliability")
     risk_flags = list(dict.fromkeys(risk_flags))
     engine = ScoringEngine()
     modules = engine.calculate_modules(metrics, valuation)
     hard_fail = engine.detect_hard_fail(metrics, risk_flags, reliability)
+    if result.ok and not has_financial_metrics:
+        hard_fail = False
     scores = engine.calculate(modules, hard_fail=hard_fail)
     final_label = engine.final_label(
         scores.total_score,
@@ -116,11 +129,19 @@ def _build_gateway_score(
         data_reliability=reliability,
         price_attractiveness_score=modules.price_attractiveness_score,
     )
+    if (
+        not hard_fail
+        and not has_financial_metrics
+        and final_label == FinalLabel.REJECT
+        and _has_basic_company_data(company.name, company.ticker, company.price, company.market_cap)
+    ):
+        final_label = FinalLabel.WATCHLIST
+
     return ScoreResponse(
         company=company,
         data_basis=DataBasis(
             source="stock-data-gateway",
-            is_mock=not has_financials,
+            is_mock=False,
             reliability=max(round(reliability, 2), 0),
             notes=notes,
         ),
@@ -131,6 +152,12 @@ def _build_gateway_score(
         hard_fail=hard_fail,
         final_label=final_label,
     )
+
+
+def _has_basic_company_data(
+    name: str, ticker: str, price: float | None, market_cap: float | None
+) -> bool:
+    return name.upper() != ticker.upper() or price is not None or market_cap is not None
 
 
 def _disclosure_risk_flags(raw: Any) -> list[str]:
