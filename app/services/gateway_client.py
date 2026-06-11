@@ -8,6 +8,7 @@ import httpx
 class GatewayResult:
     data: Any = None
     error: str | None = None
+    auth_failed: bool = False
 
     @property
     def ok(self) -> bool:
@@ -25,9 +26,11 @@ class GatewayClient:
         self,
         base_url: str,
         timeout: float = 15.0,
+        bearer_token: str | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
+        self.bearer_token = bearer_token.strip() if bearer_token else None
         self.timeout = timeout
         self.transport = transport
 
@@ -48,13 +51,25 @@ class GatewayClient:
         )
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> GatewayResult:
+        if not self.bearer_token:
+            return GatewayResult(
+                error="stock-data-gateway authorization failed",
+                auth_failed=True,
+            )
+
         try:
             async with httpx.AsyncClient(
                 base_url=self.base_url,
+                headers={"Authorization": f"Bearer {self.bearer_token}"},
                 timeout=self.timeout,
                 transport=self.transport,
             ) as client:
                 response = await client.request(method, path, **kwargs)
+                if response.status_code in (401, 403):
+                    return GatewayResult(
+                        error="stock-data-gateway authorization failed",
+                        auth_failed=True,
+                    )
                 response.raise_for_status()
                 return GatewayResult(data=response.json())
         except (httpx.HTTPError, ValueError):
