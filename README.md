@@ -58,6 +58,7 @@ API 문서 확인:
 | 변수 | 설명 |
 | --- | --- |
 | `STOCK_DATA_GATEWAY_URL` | `/score/{market}/{ticker}`가 호출하는 데이터 게이트웨이 URL. 미설정 시 `https://stock-data-gateway.onrender.com`을 사용합니다. |
+| `STOCK_DATA_GATEWAY_BEARER_TOKEN` | stock-discovery-gpt가 stock-data-gateway를 호출할 때 `Authorization: Bearer ...` 헤더에 사용하는 토큰 |
 | `FMP_API_KEY` | 기존 직접 FMP 클라이언트를 사용하는 서비스용 선택 설정. `/score`는 게이트웨이를 통해 FMP 데이터를 조회합니다. |
 | `DART_API_KEY` | 기존 직접 DART 클라이언트를 사용하는 서비스용 선택 설정. `/score`는 게이트웨이를 통해 DART/KRX 데이터를 조회합니다. |
 | `ACTION_API_BEARER_TOKEN` | Custom GPT Action 호출 보호용 Bearer 토큰 |
@@ -242,7 +243,7 @@ Render는 `PORT` 환경 변수를 자동으로 주입합니다. 위 명령은 �
 2. **New Web Service** 또는 Blueprint 배포를 선택합니다.
 3. Runtime은 Python 3.11 이상을 사용합니다.
 4. Build Command와 Start Command가 위 값과 일치하는지 확인합니다.
-5. **Environment** 탭에 `STOCK_DATA_GATEWAY_URL=https://stock-data-gateway.onrender.com`을 설정합니다.
+5. **Environment** 탭에 `STOCK_DATA_GATEWAY_URL`과 `STOCK_DATA_GATEWAY_BEARER_TOKEN`을 설정합니다.
 6. Health Check Path를 `/health`로 설정합니다.
 7. 배포 후 다음 URL이 정상 응답하는지 확인합니다.
 
@@ -258,6 +259,7 @@ Render 대시보드의 **Environment** 탭에서 다음 값을 설정합니다.
 | --- | --- | --- |
 | `ENVIRONMENT` | 권장 | `production` 등 배포 환경 이름 |
 | `STOCK_DATA_GATEWAY_URL` | 권장 | raw data gateway URL. 기본값은 `https://stock-data-gateway.onrender.com` |
+| `STOCK_DATA_GATEWAY_BEARER_TOKEN` | 필수 | stock-data-gateway 요청의 Bearer 인증에 사용할 토큰 |
 | `FMP_API_KEY` | 선택 | 기존 직접 FMP client용 키. gateway 연동 `/score`에서는 사용하지 않음 |
 | `DART_API_KEY` | 선택 | 기존 직접 DART client용 키. gateway 연동 `/score`에서는 사용하지 않음 |
 | `ACTION_API_BEARER_TOKEN` | 권장 | Custom GPT Actions에서 보호 엔드포인트 호출 시 사용할 Bearer 토큰 |
