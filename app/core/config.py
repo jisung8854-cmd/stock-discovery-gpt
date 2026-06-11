@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     dart_api_key: str | None = None
     action_api_bearer_token: str | None = None
     stock_data_gateway_url: str = "https://stock-data-gateway.onrender.com"
+    stock_data_gateway_bearer_token: str | None = None
     cors_allow_origins: list[str] = ["*"]
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
