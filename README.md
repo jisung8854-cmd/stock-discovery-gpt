@@ -57,8 +57,9 @@ API 문서 확인:
 
 | 변수 | 설명 |
 | --- | --- |
-| `FMP_API_KEY` | FMP 미국 주식 데이터 API 키. 설정 시 미국 종목 스코어링에서 회사 프로필, 손익계산서, 재무상태표, 현금흐름표, key metrics, ratios, quote를 조회합니다. |
-| `DART_API_KEY` | DART 한국 공시 데이터 API 키. 설정 시 KOSPI/KOSDAQ 종목 스코어링에서 고유번호, 기업개황, 단일회사 주요계정, 최근 공시를 조회합니다. |
+| `STOCK_DATA_GATEWAY_URL` | `/score/{market}/{ticker}`가 호출하는 데이터 게이트웨이 URL. 미설정 시 `https://stock-data-gateway.onrender.com`을 사용합니다. |
+| `FMP_API_KEY` | 기존 직접 FMP 클라이언트를 사용하는 서비스용 선택 설정. `/score`는 게이트웨이를 통해 FMP 데이터를 조회합니다. |
+| `DART_API_KEY` | 기존 직접 DART 클라이언트를 사용하는 서비스용 선택 설정. `/score`는 게이트웨이를 통해 DART/KRX 데이터를 조회합니다. |
 | `ACTION_API_BEARER_TOKEN` | Custom GPT Action 호출 보호용 Bearer 토큰 |
 | `ENVIRONMENT` | 실행 환경. 기본값은 `development` |
 
@@ -66,7 +67,7 @@ API 문서 확인:
 
 ## FMP 미국 주식 데이터 설정
 
-미국 상장 종목(`NASDAQ`, `NYSE`, `AMEX`)은 `FMP_API_KEY`가 있을 때 Financial Modeling Prep API를 사용합니다. 현재 연동되는 FMP 엔드포인트는 다음과 같습니다.
+기존 직접 FMP 클라이언트는 `FMP_API_KEY`가 있을 때 Financial Modeling Prep API를 사용합니다. `/score`의 미국 상장 종목(`NASDAQ`, `NYSE`, `AMEX`) 요청은 API 키를 scoring backend에 노출하지 않고 stock-data-gateway의 `/v1/market-snapshot`을 사용합니다. 현재 연동되는 FMP 엔드포인트는 다음과 같습니다.
 
 - `profile/{ticker}`
 - `income-statement/{ticker}`
@@ -80,7 +81,7 @@ API 문서 확인:
 
 ## DART 한국 주식 데이터 설정
 
-한국 상장 종목(`KOSPI`, `KOSDAQ`)은 `DART_API_KEY`가 있을 때 OpenDART API를 사용합니다. 티커는 `005930`, `083450`처럼 6자리 종목코드를 입력합니다. 현재 연동되는 DART 엔드포인트는 다음과 같습니다.
+기존 직접 DART 클라이언트는 `DART_API_KEY`가 있을 때 OpenDART API를 사용합니다. `/score`의 한국 상장 종목(`KOSPI`, `KOSDAQ`) 요청은 stock-data-gateway의 `/kr/resolve`, `/kr/dart/company`, `/kr/dart/disclosures`를 필요한 범위에서 사용합니다. 티커는 `005930`, `083450`처럼 6자리 종목코드를 입력합니다. 현재 연동되는 DART 엔드포인트는 다음과 같습니다.
 
 - `corpCode.xml`
 - `company.json`
@@ -101,7 +102,7 @@ Render 및 브라우저 확인용 공개 루트 엔드포인트입니다. 앱 �
 
 ### `POST /score/{market}/{ticker}`
 
-단일 종목에 대한 스코어 응답을 반환합니다. 미국 시장은 gateway의 `/v1/market-snapshot`을 호출하고, 한국 시장은 필요할 때 `/kr/resolve`로 종목 코드를 확인한 뒤 `/kr/dart/company`와 `/kr/dart/disclosures`를 호출합니다. gateway 장애나 상세 재무 데이터 누락 시 partial fallback과 낮아진 데이터 신뢰도를 반환합니다.
+단일 종목에 대한 스코어 응답을 반환합니다. 미국 시장은 gateway의 `/v1/market-snapshot`을 호출하고, 한국 시장은 필요할 때 `/kr/resolve`로 종목 코드를 확인한 뒤 `/kr/dart/company`와 `/kr/dart/disclosures`를 호출합니다. gateway 장애나 상세 재무 데이터 누락 시 값을 만들어내지 않고 partial result와 낮아진 데이터 신뢰도를 반환합니다.
 
 - `market`: `NASDAQ`, `NYSE`, `AMEX`, `KOSPI`, `KOSDAQ`
 - `ticker`: 미국 티커 또는 한국 종목 코드
