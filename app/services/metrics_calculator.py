@@ -178,7 +178,9 @@ def calculate_fmp_valuation_metrics(
 
 
 def calculate_dart_financial_metrics(financial_rows: list[dict[str, Any]]) -> FinancialMetrics:
-    latest_revenue = _dart_account_number(financial_rows, ("매출액", "수익(매출액)", "영업수익"))
+    latest_revenue = _dart_account_number(
+        financial_rows, ("매출액", "수익(매출액)", "영업수익")
+    )
     previous_revenue = _dart_account_number(
         financial_rows, ("매출액", "수익(매출액)", "영업수익"), amount_key="frmtrm_amount"
     )
@@ -287,26 +289,22 @@ def _parse_dart_amount(value: Any) -> float | None:
 
 def calculate_gateway_metrics(
     raw: dict[str, Any] | None,
-) -> tuple[FinancialMetrics, ValuationMetrics, bool, bool]:
-    """Extract gateway-normalized metrics without inventing unavailable financial data."""
+) -> tuple[FinancialMetrics, ValuationMetrics, bool]:
+    """Extract normalized metrics when present, otherwise return deterministic fallback metrics."""
     raw = raw or {}
     payload = raw.get("data") if isinstance(raw.get("data"), dict) else raw
-    metrics_raw = _first_mapping(payload, "metrics", "financial_metrics", "financials")
-    valuation_raw = _first_mapping(payload, "valuation", "valuation_metrics")
+    metrics_raw = payload.get("metrics") if isinstance(payload.get("metrics"), dict) else {}
+    valuation_raw = (
+        payload.get("valuation") if isinstance(payload.get("valuation"), dict) else {}
+    )
+    has_financials = bool(metrics_raw or valuation_raw)
+    if not has_financials:
+        return build_mock_financial_metrics(), build_mock_valuation_metrics(), False
     metric_fields = FinancialMetrics.model_fields
     valuation_fields = ValuationMetrics.model_fields
-    metrics = FinancialMetrics(
-        **{key: value for key, value in metrics_raw.items() if key in metric_fields}
-    )
+    normalized_metrics = {key: value for key, value in metrics_raw.items() if key in metric_fields}
+    metrics = FinancialMetrics(**normalized_metrics)
     valuation = ValuationMetrics(
         **{key: value for key, value in valuation_raw.items() if key in valuation_fields}
     )
-    return metrics, valuation, bool(metrics_raw), bool(valuation_raw)
-
-
-def _first_mapping(source: dict[str, Any], *keys: str) -> dict[str, Any]:
-    for key in keys:
-        value = source.get(key)
-        if isinstance(value, dict):
-            return value
-    return {}
+    return metrics, valuation, True

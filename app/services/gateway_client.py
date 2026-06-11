@@ -3,6 +3,8 @@ from typing import Any
 
 import httpx
 
+AUTH_FAILURE_MESSAGE = "stock-data-gateway authorization failed"
+
 
 @dataclass(frozen=True)
 class GatewayResult:
@@ -25,8 +27,8 @@ class GatewayClient:
     def __init__(
         self,
         base_url: str,
-        timeout: float = 15.0,
         bearer_token: str | None = None,
+        timeout: float = 15.0,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
@@ -52,10 +54,7 @@ class GatewayClient:
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> GatewayResult:
         if not self.bearer_token:
-            return GatewayResult(
-                error="stock-data-gateway authorization failed",
-                auth_failed=True,
-            )
+            return GatewayResult(error=AUTH_FAILURE_MESSAGE, auth_failed=True)
 
         try:
             async with httpx.AsyncClient(
@@ -65,11 +64,8 @@ class GatewayClient:
                 transport=self.transport,
             ) as client:
                 response = await client.request(method, path, **kwargs)
-                if response.status_code in (401, 403):
-                    return GatewayResult(
-                        error="stock-data-gateway authorization failed",
-                        auth_failed=True,
-                    )
+                if response.status_code in {401, 403}:
+                    return GatewayResult(error=AUTH_FAILURE_MESSAGE, auth_failed=True)
                 response.raise_for_status()
                 return GatewayResult(data=response.json())
         except (httpx.HTTPError, ValueError):
