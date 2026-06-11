@@ -3,6 +3,29 @@ from typing import Any
 from app.models.financials import FinancialMetrics, ValuationMetrics
 from app.services.normalizer import gateway_number
 
+GATEWAY_METRIC_ALIASES: dict[str, tuple[str, ...]] = {
+    "revenue_growth": ("revenue_growth", "revenueGrowth"),
+    "gross_margin": ("gross_margin", "grossMargin"),
+    "operating_margin": ("operating_margin", "operatingMargin"),
+    "net_margin": ("net_margin", "netMargin"),
+    "free_cash_flow": ("free_cash_flow", "freeCashFlow"),
+    "fcf_margin": ("fcf_margin", "fcfMargin", "freeCashFlowMargin"),
+    "fcf_yield": ("fcf_yield", "fcfYield"),
+    "roe": ("roe", "returnOnEquity"),
+    "roic": ("roic", "returnOnInvestedCapital"),
+    "debt_to_equity": ("debt_to_equity", "debtToEquity"),
+    "current_ratio": ("current_ratio", "currentRatio"),
+    "total_equity": ("total_equity", "totalEquity"),
+}
+
+GATEWAY_VALUATION_ALIASES: dict[str, tuple[str, ...]] = {
+    "pe_ratio": ("pe_ratio", "peRatio", "per", "pe"),
+    "forward_pe": ("forward_pe", "forwardPE", "forwardPe", "forward_per"),
+    "ev_to_ebitda": ("ev_to_ebitda", "evToEbitda", "ev_ebitda"),
+    "price_to_book": ("price_to_book", "priceToBook", "pbRatio", "pbr"),
+    "margin_of_safety": ("margin_of_safety", "marginOfSafety"),
+}
+
 
 def build_mock_financial_metrics() -> FinancialMetrics:
     return FinancialMetrics(
@@ -294,32 +317,11 @@ def calculate_gateway_metrics(
 ) -> tuple[FinancialMetrics, ValuationMetrics, bool, bool]:
     """Map available gateway values while preserving unavailable fields as null."""
     raw = raw or {}
-    metric_aliases = {
-        "revenue_growth": ("revenue_growth", "revenueGrowth"),
-        "gross_margin": ("gross_margin", "grossMargin"),
-        "operating_margin": ("operating_margin", "operatingMargin"),
-        "net_margin": ("net_margin", "netMargin"),
-        "free_cash_flow": ("free_cash_flow", "freeCashFlow"),
-        "fcf_margin": ("fcf_margin", "fcfMargin", "freeCashFlowMargin"),
-        "fcf_yield": ("fcf_yield", "fcfYield"),
-        "roe": ("roe", "returnOnEquity"),
-        "roic": ("roic", "returnOnInvestedCapital"),
-        "debt_to_equity": ("debt_to_equity", "debtToEquity"),
-        "current_ratio": ("current_ratio", "currentRatio"),
-        "total_equity": ("total_equity", "totalEquity"),
-    }
-    valuation_aliases = {
-        "pe_ratio": ("pe_ratio", "peRatio", "per", "pe"),
-        "forward_pe": ("forward_pe", "forwardPE", "forwardPe", "forward_per"),
-        "ev_to_ebitda": ("ev_to_ebitda", "evToEbitda", "ev_ebitda"),
-        "price_to_book": ("price_to_book", "priceToBook", "pbRatio", "pbr"),
-        "margin_of_safety": ("margin_of_safety", "marginOfSafety"),
-    }
     metric_values = {
-        field: gateway_number(raw, *aliases) for field, aliases in metric_aliases.items()
+        field: gateway_number(raw, *aliases) for field, aliases in GATEWAY_METRIC_ALIASES.items()
     }
     valuation_values = {
-        field: gateway_number(raw, *aliases) for field, aliases in valuation_aliases.items()
+        field: gateway_number(raw, *aliases) for field, aliases in GATEWAY_VALUATION_ALIASES.items()
     }
     metrics = FinancialMetrics(**metric_values)
     valuation = ValuationMetrics(**valuation_values)

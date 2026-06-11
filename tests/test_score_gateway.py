@@ -12,6 +12,7 @@ client = TestClient(app)
 class StubGatewayClient:
     calls: list[tuple[Any, ...]] = []
     snapshot_mode = "complete"
+    fail_dart_company = False
 
     def __init__(self, base_url: str) -> None:
         self.calls.append(("base_url", base_url))
@@ -57,6 +58,8 @@ class StubGatewayClient:
 
     async def get_dart_company_profile(self, stock_code: str) -> GatewayResult:
         self.calls.append(("company", stock_code))
+        if self.fail_dart_company:
+            return GatewayResult(error="stock-data-gateway request failed for /kr/dart/company")
         return GatewayResult(
             data={
                 "source": "dart-via-stock-data-gateway",
@@ -74,6 +77,7 @@ class StubGatewayClient:
 def setup_function() -> None:
     StubGatewayClient.calls = []
     StubGatewayClient.snapshot_mode = "complete"
+    StubGatewayClient.fail_dart_company = False
 
 
 def test_aapl_gateway_snapshot_maps_analysis_without_hard_fail(monkeypatch: Any) -> None:
@@ -157,6 +161,30 @@ def test_kospi_stock_code_loads_mocked_dart_gateway_data(monkeypatch: Any) -> No
     assert body["company"]["ticker"] == "005930"
     assert body["company"]["name"] == "삼성전자"
     assert "disclosure_risk_detected" in body["risk_flags"]
+
+
+def test_korean_query_resolves_before_dart_gateway_calls(monkeypatch: Any) -> None:
+    monkeypatch.setattr(score, "GatewayClient", StubGatewayClient)
+
+    response = client.post("/score/KOSDAQ/%EC%82%BC%EC%84%B1%EC%A0%84%EC%9E%90")
+
+    assert response.status_code == 200
+    assert ("resolve", "삼성전자") in StubGatewayClient.calls
+    assert ("company", "005930") in StubGatewayClient.calls
+    assert ("disclosures", "005930", 20) in StubGatewayClient.calls
+
+
+def test_dart_company_failure_keeps_partial_gateway_response(monkeypatch: Any) -> None:
+    StubGatewayClient.fail_dart_company = True
+    monkeypatch.setattr(score, "GatewayClient", StubGatewayClient)
+
+    response = client.post("/score/KOSPI/005930")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "gateway_unavailable" in body["risk_flags"]
+    assert "partial_gateway_data" in body["risk_flags"]
+    assert "dart_data_unavailable" in body["risk_flags"]
 
 
 def test_score_stock_openapi_contract_survives_gateway_merge() -> None:

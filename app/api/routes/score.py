@@ -16,6 +16,7 @@ from app.services.scoring_engine import ScoringEngine
 
 router = APIRouter(tags=["score"], dependencies=[Depends(verify_action_bearer_token)])
 US_MARKETS = {Market.NASDAQ, Market.NYSE, Market.AMEX}
+KOREAN_MARKETS = {Market.KOSPI, Market.KOSDAQ}
 DISCLOSURE_RISK_TERMS = (
     "유상증자",
     "전환사채",
@@ -48,7 +49,9 @@ async def score_stock(
     if market in US_MARKETS:
         result = await client.get_market_snapshot(ticker.upper(), market.value)
         return _build_gateway_score(market, ticker, result, provider_flag="fmp_data_unavailable")
-    return await _score_korean_stock(client, market, ticker)
+    if market in KOREAN_MARKETS:
+        return await _score_korean_stock(client, market, ticker)
+    raise ValueError(f"Unsupported market: {market}")
 
 
 async def _score_korean_stock(client: GatewayClient, market: Market, ticker: str) -> ScoreResponse:

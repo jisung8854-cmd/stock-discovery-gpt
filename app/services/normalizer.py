@@ -101,7 +101,10 @@ def gateway_value(raw: Any, *keys: str) -> Any:
         for key in keys:
             if raw.get(key) not in (None, ""):
                 return raw[key]
-        for value in raw.values():
+        preferred_keys = ("data", "company", "profile", "quote", "metrics", "valuation")
+        nested_values = [raw[key] for key in preferred_keys if key in raw]
+        nested_values.extend(value for key, value in raw.items() if key not in preferred_keys)
+        for value in nested_values:
             found = gateway_value(value, *keys)
             if found not in (None, ""):
                 return found
