@@ -66,3 +66,58 @@ def normalize_dart_company(
         industry=None,
         market_cap=None,
     )
+
+
+def normalize_gateway_company(
+    raw: dict[str, Any] | None,
+    market: Market,
+    ticker: str,
+) -> CompanySummary:
+    """Normalize common gateway snapshot/DART profile shapes without inventing data."""
+    raw = raw or {}
+    return CompanySummary(
+        ticker=str(gateway_value(raw, "ticker", "symbol", "stock_code", "code") or ticker).upper(),
+        market=market,
+        name=str(
+            gateway_value(raw, "name", "company_name", "companyName", "corp_name")
+            or ticker.upper()
+        ),
+        sector=_optional_string(gateway_value(raw, "sector")),
+        industry=_optional_string(gateway_value(raw, "industry")),
+        market_cap=gateway_number(raw, "market_cap", "marketCap", "mktCap"),
+        price=gateway_number(raw, "price", "current_price", "currentPrice"),
+        currency=_optional_string(gateway_value(raw, "currency")),
+    )
+
+
+def resolved_stock_code(raw: Any, fallback: str) -> str:
+    value = gateway_value(raw, "stock_code", "ticker", "symbol", "code")
+    return str(value or fallback).zfill(6)
+
+
+def gateway_value(raw: Any, *keys: str) -> Any:
+    """Find the first non-empty value for gateway aliases in nested mappings/lists."""
+    if isinstance(raw, dict):
+        for key in keys:
+            if raw.get(key) not in (None, ""):
+                return raw[key]
+        for value in raw.values():
+            found = gateway_value(value, *keys)
+            if found not in (None, ""):
+                return found
+    elif isinstance(raw, list):
+        for value in raw:
+            found = gateway_value(value, *keys)
+            if found not in (None, ""):
+                return found
+    return None
+
+
+def gateway_number(raw: Any, *keys: str) -> float | None:
+    value = gateway_value(raw, *keys)
+    if isinstance(value, bool) or value in (None, ""):
+        return None
+    try:
+        return float(str(value).replace(",", ""))
+    except ValueError:
+        return None

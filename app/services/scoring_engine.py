@@ -21,6 +21,9 @@ LOW_DATA_RELIABILITY_THRESHOLD = 0.5
 CRITICAL_DATA_RELIABILITY_THRESHOLD = 0.25
 
 HARD_FAIL_RISK_FLAGS = {
+    "gateway_unavailable",
+    # Preserve legacy direct-DART service behavior; gateway score routes do not emit this flag.
+    "partial_dart_data",
     "audit_opinion_issue",
     "trading_suspension",
     "trading_suspension_related",
@@ -199,16 +202,9 @@ class ScoringEngine:
         negative_equity = (metrics.total_equity is not None and metrics.total_equity < 0) or (
             metrics.debt_to_equity is not None and metrics.debt_to_equity < 0
         )
-        repeated_dilution_with_negative_fcf = (
-            metrics.share_count_growth is not None
-            and metrics.share_count_growth > 0.1
-            and (
-                (metrics.free_cash_flow is not None and metrics.free_cash_flow < 0)
-                or (fcf_margin is not None and fcf_margin < 0)
-            )
-        )
-        missing_critical_data = data_reliability < CRITICAL_DATA_RELIABILITY_THRESHOLD or all(
-            value is None for value in critical_metrics
+        missing_critical_data = (
+            data_reliability < CRITICAL_DATA_RELIABILITY_THRESHOLD
+            and all(value is None for value in critical_metrics)
         )
 
         return any(
@@ -216,7 +212,6 @@ class ScoringEngine:
                 bool(risk_flag_set & HARD_FAIL_RISK_FLAGS),
                 severe_liquidity_risk,
                 negative_equity,
-                repeated_dilution_with_negative_fcf,
                 missing_critical_data,
             ]
         )

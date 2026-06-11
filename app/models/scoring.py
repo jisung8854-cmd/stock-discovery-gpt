@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field, RootModel
+from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator
 
 from app.models.common import DataBasis, FinalLabel, Market
 from app.models.company import CompanySummary
@@ -42,15 +42,34 @@ class CompositeScores(BaseModel):
     modules: ScoreModules
 
 
+class ScoreValuationMetrics(ValuationMetrics):
+    """Score response valuation view with gateway quote context and common aliases."""
+
+    price: float | None = Field(default=None, ge=0)
+    market_cap: float | None = Field(default=None, ge=0)
+    currency: str | None = None
+    per: float | None = None
+    forward_per: float | None = None
+    ev_ebitda: float | None = None
+    fcf_yield: float | None = None
+
+
 class ScoreResponse(BaseModel):
     company: CompanySummary
     data_basis: DataBasis
     metrics: FinancialMetrics
-    valuation: ValuationMetrics
+    valuation: ScoreValuationMetrics
     scores: CompositeScores
     risk_flags: list[str] = Field(default_factory=list)
     hard_fail: bool
     final_label: FinalLabel
+
+    @field_validator("valuation", mode="before")
+    @classmethod
+    def normalize_valuation(cls, value: object) -> object:
+        if isinstance(value, ValuationMetrics) and not isinstance(value, ScoreValuationMetrics):
+            return ScoreValuationMetrics(**value.model_dump())
+        return value
 
     model_config = ConfigDict(
         json_schema_extra={

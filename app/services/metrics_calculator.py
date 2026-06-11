@@ -1,6 +1,7 @@
 from typing import Any
 
 from app.models.financials import FinancialMetrics, ValuationMetrics
+from app.services.normalizer import gateway_number
 
 
 def build_mock_financial_metrics() -> FinancialMetrics:
@@ -285,3 +286,43 @@ def _parse_dart_amount(value: Any) -> float | None:
     except ValueError:
         return None
     return -parsed if negative else parsed
+
+
+
+def calculate_gateway_metrics(
+    raw: dict[str, Any] | None,
+) -> tuple[FinancialMetrics, ValuationMetrics, bool, bool]:
+    """Map available gateway values while preserving unavailable fields as null."""
+    raw = raw or {}
+    metric_aliases = {
+        "revenue_growth": ("revenue_growth", "revenueGrowth"),
+        "gross_margin": ("gross_margin", "grossMargin"),
+        "operating_margin": ("operating_margin", "operatingMargin"),
+        "net_margin": ("net_margin", "netMargin"),
+        "free_cash_flow": ("free_cash_flow", "freeCashFlow"),
+        "fcf_margin": ("fcf_margin", "fcfMargin", "freeCashFlowMargin"),
+        "fcf_yield": ("fcf_yield", "fcfYield"),
+        "roe": ("roe", "returnOnEquity"),
+        "roic": ("roic", "returnOnInvestedCapital"),
+        "debt_to_equity": ("debt_to_equity", "debtToEquity"),
+        "current_ratio": ("current_ratio", "currentRatio"),
+        "total_equity": ("total_equity", "totalEquity"),
+    }
+    valuation_aliases = {
+        "pe_ratio": ("pe_ratio", "peRatio", "per", "pe"),
+        "forward_pe": ("forward_pe", "forwardPE", "forwardPe", "forward_per"),
+        "ev_to_ebitda": ("ev_to_ebitda", "evToEbitda", "ev_ebitda"),
+        "price_to_book": ("price_to_book", "priceToBook", "pbRatio", "pbr"),
+        "margin_of_safety": ("margin_of_safety", "marginOfSafety"),
+    }
+    metric_values = {
+        field: gateway_number(raw, *aliases) for field, aliases in metric_aliases.items()
+    }
+    valuation_values = {
+        field: gateway_number(raw, *aliases) for field, aliases in valuation_aliases.items()
+    }
+    metrics = FinancialMetrics(**metric_values)
+    valuation = ValuationMetrics(**valuation_values)
+    has_financial_metrics = any(value is not None for value in metric_values.values())
+    has_valuation_data = any(value is not None for value in valuation_values.values())
+    return metrics, valuation, has_financial_metrics, has_valuation_data

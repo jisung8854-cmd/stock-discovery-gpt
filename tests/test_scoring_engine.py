@@ -183,3 +183,21 @@ def test_low_data_reliability_cannot_be_elite() -> None:
     )
 
     assert label == FinalLabel.WATCHLIST
+
+
+def test_missing_metrics_with_medium_reliability_is_not_hard_fail() -> None:
+    hard_fail = ScoringEngine().detect_hard_fail(
+        FinancialMetrics(),
+        risk_flags=["partial_gateway_data", "financial_metrics_missing"],
+        data_reliability=0.75,
+    )
+
+    assert hard_fail is False
+
+
+def test_gateway_unavailable_is_hard_fail() -> None:
+    hard_fail = ScoringEngine().detect_hard_fail(
+        FinancialMetrics(), risk_flags=["gateway_unavailable"], data_reliability=0.1
+    )
+
+    assert hard_fail is True
