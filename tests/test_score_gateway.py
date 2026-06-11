@@ -157,3 +157,21 @@ def test_kospi_stock_code_loads_mocked_dart_gateway_data(monkeypatch: Any) -> No
     assert body["company"]["ticker"] == "005930"
     assert body["company"]["name"] == "삼성전자"
     assert "disclosure_risk_detected" in body["risk_flags"]
+
+
+def test_score_stock_openapi_contract_survives_gateway_merge() -> None:
+    """Keep the deployed Custom GPT Action contract stable after conflict resolution."""
+    operation = app.openapi()["paths"]["/score/{market}/{ticker}"]["post"]
+    response_schema = app.openapi()["components"]["schemas"]["ScoreResponse"]
+
+    assert operation["operationId"] == "scoreStock"
+    assert set(response_schema["properties"]) == {
+        "company",
+        "data_basis",
+        "metrics",
+        "valuation",
+        "scores",
+        "risk_flags",
+        "hard_fail",
+        "final_label",
+    }
