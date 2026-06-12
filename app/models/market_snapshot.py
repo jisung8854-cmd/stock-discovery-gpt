@@ -34,6 +34,12 @@ class SnapshotValuation(BaseModel):
     price_to_sales: float | None = None
     price_to_book: float | None = None
     fcf_yield: float | None = None
+    enterprise_value: float | None = None
+    ev_to_sales: float | None = None
+    ev_to_operating_cash_flow: float | None = None
+    ev_to_free_cash_flow: float | None = None
+    net_debt_to_ebitda: float | None = None
+    earnings_yield: float | None = None
     # Compatibility names consumed by the current scoreStock normalizer.
     pe_ratio: float | None = None
     ev_to_ebitda: float | None = None
@@ -53,6 +59,16 @@ class SnapshotFinancialMetrics(BaseModel):
     roic: float | None = None
     debt_to_equity: float | None = None
     current_ratio: float | None = None
+    return_on_assets: float | None = None
+    operating_return_on_assets: float | None = None
+    return_on_tangible_assets: float | None = None
+    invested_capital: float | None = None
+    working_capital: float | None = None
+    tangible_asset_value: float | None = None
+    net_current_asset_value: float | None = None
+    free_cash_flow_to_equity: float | None = None
+    capex_to_operating_cash_flow: float | None = None
+    capex_to_revenue: float | None = None
 
 
 class SnapshotMarketData(BaseModel):
@@ -62,6 +78,7 @@ class SnapshotMarketData(BaseModel):
     year_low: float | None = None
     sector: str | None = None
     industry: str | None = None
+    exchange: str | None = None
 
 
 class MarketSnapshotData(BaseModel):

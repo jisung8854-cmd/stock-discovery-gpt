@@ -68,7 +68,7 @@ def _normalize_snapshot(
 ) -> MarketSnapshotData:
     profile = _dict_data(results["profile"])
     quote = _dict_data(results["quote"])
-    key_metrics = _first(results["key-metrics"])
+    key_metrics = _latest_preferred(results["key-metrics"])
     ratios = _first(results["ratios"])
     income = _list_data(results["income-statement"])
     cash_flow = _first(results["cash-flow-statement"])
@@ -91,7 +91,7 @@ def _normalize_snapshot(
     ev_ebitda = _pick_number(
         key_metrics,
         ratios,
-        keys=("enterpriseValueOverEBITDA", "enterpriseValueMultiple", "evToEbitda"),
+        keys=("evToEBITDA", "enterpriseValueOverEBITDA", "enterpriseValueMultiple", "evToEbitda"),
     )
     price_to_sales = _pick_number(
         key_metrics,
@@ -135,14 +135,24 @@ def _normalize_snapshot(
         free_cash_flow=free_cash_flow,
         fcf_margin=fcf_margin,
         fcf_yield=fcf_yield,
-        roe=_pick_number(ratios, key_metrics, keys=("returnOnEquity", "roe")),
+        roe=_pick_number(key_metrics, ratios, keys=("returnOnEquity", "roe")),
         roic=_pick_number(
-            ratios, key_metrics, keys=("returnOnInvestedCapital", "roic", "returnOnCapitalEmployed")
+            key_metrics, ratios, keys=("returnOnInvestedCapital", "roic", "returnOnCapitalEmployed")
         ),
         debt_to_equity=_pick_number(
             ratios, key_metrics, balance, keys=("debtEquityRatio", "debtToEquity")
         ),
-        current_ratio=_pick_number(ratios, key_metrics, balance, keys=("currentRatio",)),
+        current_ratio=_pick_number(key_metrics, ratios, balance, keys=("currentRatio",)),
+        return_on_assets=_number(key_metrics, "returnOnAssets"),
+        operating_return_on_assets=_number(key_metrics, "operatingReturnOnAssets"),
+        return_on_tangible_assets=_number(key_metrics, "returnOnTangibleAssets"),
+        invested_capital=_number(key_metrics, "investedCapital"),
+        working_capital=_number(key_metrics, "workingCapital"),
+        tangible_asset_value=_number(key_metrics, "tangibleAssetValue"),
+        net_current_asset_value=_number(key_metrics, "netCurrentAssetValue"),
+        free_cash_flow_to_equity=_number(key_metrics, "freeCashFlowToEquity"),
+        capex_to_operating_cash_flow=_number(key_metrics, "capexToOperatingCashFlow"),
+        capex_to_revenue=_number(key_metrics, "capexToRevenue"),
     )
     valuation = SnapshotValuation(
         price=price,
@@ -153,6 +163,12 @@ def _normalize_snapshot(
         price_to_sales=price_to_sales,
         price_to_book=price_to_book,
         fcf_yield=fcf_yield,
+        enterprise_value=_number(key_metrics, "enterpriseValue"),
+        ev_to_sales=_number(key_metrics, "evToSales"),
+        ev_to_operating_cash_flow=_number(key_metrics, "evToOperatingCashFlow"),
+        ev_to_free_cash_flow=_number(key_metrics, "evToFreeCashFlow"),
+        net_debt_to_ebitda=_number(key_metrics, "netDebtToEBITDA"),
+        earnings_yield=_number(key_metrics, "earningsYield"),
         pe_ratio=pe_ttm,
         ev_to_ebitda=ev_ebitda,
     )
@@ -163,14 +179,19 @@ def _normalize_snapshot(
         year_low=_number(quote, "yearLow"),
         sector=_text(profile, "sector"),
         industry=_text(profile, "industry"),
+        exchange=_pick_text(profile, quote, keys=("exchangeShortName", "exchange")),
     )
     endpoint_errors = {
         endpoint: result.error_type or "fmp_endpoint_unavailable"
         for endpoint, result in results.items()
         if not result.ok
     }
+    if not key_metrics and "key-metrics" not in endpoint_errors:
+        endpoint_errors["key-metrics"] = "fmp_endpoint_unavailable"
     notes = [
-        f"FMP {endpoint} endpoint unavailable ({error_type})."
+        "key_metrics_unavailable"
+        if endpoint == "key-metrics"
+        else f"FMP {endpoint} endpoint unavailable ({error_type})."
         for endpoint, error_type in endpoint_errors.items()
     ]
     reliability, label = _data_reliability(
@@ -179,6 +200,7 @@ def _normalize_snapshot(
         valuation=valuation,
         financials=financials,
         failure_count=len(endpoint_errors),
+        key_metrics_available=bool(key_metrics),
         settings=settings,
     )
     return MarketSnapshotData(
@@ -216,6 +238,7 @@ def _data_reliability(
     valuation: SnapshotValuation,
     financials: SnapshotFinancialMetrics,
     failure_count: int,
+    key_metrics_available: bool,
     settings: Settings,
 ) -> tuple[float, str]:
     has_basics = price is not None and market_cap is not None
@@ -254,6 +277,9 @@ def _data_reliability(
     else:
         reliability = 0.25
         label = "low"
+    if has_basics and not key_metrics_available:
+        reliability = min(reliability, settings.market_snapshot_reliability_basic)
+        label = "medium_low"
     return round(max(reliability, 0), 2), label
 
 
@@ -278,6 +304,23 @@ def _first(result: FMPEndpointResult) -> dict[str, Any]:
     return data[0] if data else _dict_data(result)
 
 
+def _latest_preferred(result: FMPEndpointResult) -> dict[str, Any]:
+    """Select the newest key-metrics record, preferring FY/TTM for equal dates."""
+    data = _list_data(result)
+    if not data:
+        return _dict_data(result)
+    dated = [item for item in data if _text(item, "date")]
+    if not dated:
+        return data[0]
+    return max(
+        dated,
+        key=lambda item: (
+            _text(item, "date") or "",
+            (_text(item, "period") or "").upper() in {"FY", "TTM"},
+        ),
+    )
+
+
 def _number(data: Mapping[str, Any], key: str) -> float | None:
     value = data.get(key)
     if value is None or isinstance(value, bool):
@@ -300,6 +343,15 @@ def _pick_number(*sources: Mapping[str, Any], keys: tuple[str, ...]) -> float | 
 def _text(data: Mapping[str, Any], key: str) -> str | None:
     value = data.get(key)
     return str(value) if value not in (None, "") else None
+
+
+def _pick_text(*sources: Mapping[str, Any], keys: tuple[str, ...]) -> str | None:
+    for source in sources:
+        for key in keys:
+            value = _text(source, key)
+            if value is not None:
+                return value
+    return None
 
 
 def _divide(numerator: float | None, denominator: float | None) -> float | None:
