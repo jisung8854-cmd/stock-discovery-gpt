@@ -302,3 +302,18 @@ Bearer <ACTION_API_BEARER_TOKEN>
 - `GET /candidates/top` — 상위 후보 조회
 
 이 API는 리서치와 스크리닝 목적의 백엔드이며, 매수/매도 주문을 생성하지 않습니다.
+
+## `/v1/market-snapshot` 데이터 범위와 partial 응답
+
+`POST /v1/market-snapshot`은 기존 symbol/market 요청 구조와 기본 company/quote 정보를 유지하면서, 가능한 FMP 데이터를 `data` 아래의 optional 필드로 정규화합니다. 응답에는 가격·시가총액과 함께 `valuation`의 PER, forward PER, EV/EBITDA, P/S, P/B, FCF yield, `financial_metrics`의 매출·성장률·마진·EPS·FCF·ROE·ROIC·부채비율·유동비율, `market_data`의 거래량·평균 거래량·52주 고가/저가·섹터·산업이 포함될 수 있습니다. 공급자가 값을 제공하지 않으면 해당 필드는 값을 추정해 만들지 않고 `null`입니다.
+
+FMP 무료 플랜이나 계정 권한에 따라 `key-metrics`, `ratios`, 재무제표 endpoint 일부가 제한될 수 있습니다. 이 경우 snapshot 전체 요청은 실패하지 않고 사용 가능한 profile/quote 등의 partial data를 HTTP 200 응답으로 반환합니다. 제한되거나 사용할 수 없는 endpoint는 민감정보 없이 `notes`, `endpoint_errors`, `error_type`에 표시됩니다. `fmp_auth_failed_or_plan_limited`는 401/403 또는 플랜 제한, `fmp_timeout`은 timeout, `fmp_endpoint_unavailable`은 그 밖의 endpoint 실패를 뜻합니다.
+
+`data_reliability`와 `data_reliability_label`은 다음처럼 해석합니다.
+
+- `high` / 약 `0.75` 이상: 가격·시가총액, valuation, financial metrics를 함께 확보했습니다.
+- `medium` / 약 `0.60` 이상: 가격·시가총액과 valuation 일부를 확보했지만 상세 재무 데이터가 제한적입니다.
+- `medium_low` / 약 `0.45` 이상: 기본 가격·시가총액 중심의 partial data입니다.
+- `low`: 가격 또는 시가총액 등 기본 데이터도 부족합니다.
+
+partial 응답에서는 `null` 필드와 `notes`를 확인하고, 낮은 신뢰도의 값을 완전한 재무 분석으로 해석하지 않아야 합니다. API key, bearer token, secret은 응답과 notes에 포함되지 않습니다.
