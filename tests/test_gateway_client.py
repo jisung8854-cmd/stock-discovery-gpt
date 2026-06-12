@@ -23,6 +23,7 @@ def test_gateway_client_sends_authorization_header_for_market_snapshot() -> None
     )
     result = asyncio.run(client.get_market_snapshot("AAPL", "NASDAQ"))
 
+    assert client.gateway_bearer_token_configured is True
     assert result.ok
     assert result.data["company"]["symbol"] == "AAPL"
 
@@ -38,6 +39,7 @@ def test_gateway_client_returns_safe_failure_when_bearer_token_is_missing() -> N
     )
     result = asyncio.run(client.get_market_snapshot("AAPL", "NASDAQ"))
 
+    assert client.gateway_bearer_token_configured is False
     assert not result.ok
     assert result.error == "gateway_auth_missing"
 
