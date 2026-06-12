@@ -15,6 +15,7 @@ class FMPEndpointResult:
 
     data: dict[str, Any] | list[dict[str, Any]] | None
     error: str | None = None
+    error_type: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -93,7 +94,11 @@ class FMPClient:
         self, path: str, params: dict[str, str | int] | None = None
     ) -> FMPEndpointResult:
         if not self.api_key:
-            return FMPEndpointResult(data=None, error="FMP_API_KEY is not configured")
+            return FMPEndpointResult(
+                data=None,
+                error="FMP API key is not configured.",
+                error_type="fmp_auth_failed_or_plan_limited",
+            )
 
         request_params: dict[str, str | int] = {"apikey": self.api_key}
         if params:
@@ -109,29 +114,47 @@ class FMPClient:
                 response.raise_for_status()
                 payload = response.json()
         except httpx.TimeoutException:
-            return FMPEndpointResult(data=None, error=f"FMP timeout for {path}")
+            return FMPEndpointResult(
+                data=None, error=f"FMP timeout for {path}", error_type="fmp_timeout"
+            )
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code in {401, 403}:
                 return FMPEndpointResult(
                     data=None,
                     error="FMP authentication failed or endpoint not allowed by plan.",
+                    error_type="fmp_auth_failed_or_plan_limited",
                 )
             return FMPEndpointResult(
                 data=None,
                 error=f"FMP HTTP {exc.response.status_code} for {path}",
+                error_type="fmp_endpoint_unavailable",
             )
         except httpx.HTTPError:
-            return FMPEndpointResult(data=None, error=f"FMP network error for {path}")
+            return FMPEndpointResult(
+                data=None,
+                error=f"FMP network error for {path}",
+                error_type="fmp_endpoint_unavailable",
+            )
         except ValueError:
-            return FMPEndpointResult(data=None, error=f"FMP returned invalid JSON for {path}")
+            return FMPEndpointResult(
+                data=None,
+                error=f"FMP returned invalid JSON for {path}",
+                error_type="fmp_invalid_response",
+            )
 
         if isinstance(payload, dict) and self._is_fmp_error_payload(payload):
-            return FMPEndpointResult(data=None, error=f"FMP API error for {path}")
+            return FMPEndpointResult(
+                data=None, error=f"FMP API error for {path}", error_type="fmp_endpoint_unavailable"
+            )
         if isinstance(payload, list):
             return FMPEndpointResult(data=payload)
         if isinstance(payload, dict):
             return FMPEndpointResult(data=payload)
-        return FMPEndpointResult(data=None, error=f"FMP returned unsupported payload for {path}")
+        return FMPEndpointResult(
+            data=None,
+            error=f"FMP returned unsupported payload for {path}",
+            error_type="fmp_invalid_response",
+        )
 
     def _is_fmp_error_payload(self, payload: dict[str, Any]) -> bool:
         return "Error Message" in payload or payload.get("status") == "error"
