@@ -42,7 +42,10 @@ async def score_stock(
     ),
 ) -> ScoreResponse:
     settings = get_settings()
-    client = GatewayClient(settings.stock_data_gateway_url)
+    client = GatewayClient(
+        base_url=settings.stock_data_gateway_url,
+        bearer_token=settings.stock_data_gateway_bearer_token,
+    )
     if market in US_MARKETS:
         result = await client.get_market_snapshot(ticker.upper(), market.value)
         return _build_gateway_score(market, ticker, result, provider_flag="fmp_data_unavailable")
@@ -64,6 +67,7 @@ async def _score_korean_stock(client: GatewayClient, market: Market, ticker: str
     if resolve_result is not None:
         results.append(resolve_result)
     failures = [result for result in results if not result.ok]
+    failure_errors = [result.error for result in failures if result.error]
     successful_results = [result for result in results if result.ok]
     company_data = company_result.data if isinstance(company_result.data, dict) else {}
     return _build_gateway_score(
@@ -71,10 +75,11 @@ async def _score_korean_stock(client: GatewayClient, market: Market, ticker: str
         stock_code,
         GatewayResult(
             data=company_data,
-            error="stock-data-gateway unavailable" if not successful_results else None,
+            error=_aggregate_gateway_error(failure_errors) if not successful_results else None,
         ),
         provider_flag="dart_data_unavailable",
         endpoint_failures=len(failures),
+        endpoint_failure_errors=failure_errors,
         extra_flags=_disclosure_risk_flags(disclosures_result.data),
     )
 
@@ -85,6 +90,7 @@ def _build_gateway_score(
     result: GatewayResult,
     provider_flag: str,
     endpoint_failures: int = 0,
+    endpoint_failure_errors: list[str] | None = None,
     extra_flags: list[str] | None = None,
 ) -> ScoreResponse:
     raw = result.data if isinstance(result.data, dict) else {}
@@ -95,13 +101,17 @@ def _build_gateway_score(
 
     if not result.ok:
         risk_flags.extend(["gateway_unavailable", "partial_gateway_data", provider_flag])
-        notes.append(result.error or "stock-data-gateway unavailable")
+        _append_gateway_auth_diagnostic(result.error, risk_flags, notes)
+        if result.error not in {"gateway_auth_failed", "gateway_auth_missing"}:
+            notes.append(result.error or "stock-data-gateway unavailable")
         reliability = 0.2
     else:
         reliability = 0.85
         if endpoint_failures:
             risk_flags.extend(["partial_gateway_data", provider_flag])
             notes.append(f"{endpoint_failures} stock-data-gateway endpoint(s) unavailable.")
+            for error in endpoint_failure_errors or []:
+                _append_gateway_auth_diagnostic(error, risk_flags, notes)
             reliability -= min(endpoint_failures * 0.2, 0.4)
         if not has_financial_metrics:
             risk_flags.extend(["partial_gateway_data", "financial_metrics_missing"])
@@ -165,3 +175,22 @@ def _disclosure_risk_flags(raw: Any) -> list[str]:
     if any(term.lower() in text for term in DISCLOSURE_RISK_TERMS):
         return ["disclosure_risk_detected"]
     return []
+
+
+def _aggregate_gateway_error(errors: list[str]) -> str:
+    if "gateway_auth_failed" in errors:
+        return "gateway_auth_failed"
+    if "gateway_auth_missing" in errors:
+        return "gateway_auth_missing"
+    return "stock-data-gateway unavailable"
+
+
+def _append_gateway_auth_diagnostic(
+    error: str | None, risk_flags: list[str], notes: list[str]
+) -> None:
+    if error == "gateway_auth_failed":
+        risk_flags.append("gateway_auth_failed")
+        notes.append("stock-data-gateway authorization failed")
+    elif error == "gateway_auth_missing":
+        risk_flags.append("gateway_auth_failed")
+        notes.append("stock-data-gateway authorization is not configured")

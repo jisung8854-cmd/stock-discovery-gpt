@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -12,15 +13,20 @@ client = TestClient(app)
 class StubGatewayClient:
     calls: list[tuple[Any, ...]] = []
     fail_snapshot = False
+    snapshot_error = "stock-data-gateway request failed for /v1/market-snapshot"
     omit_valuation = False
+    expected_bearer_token: str | None = None
 
-    def __init__(self, base_url: str) -> None:
+    def __init__(self, base_url: str, bearer_token: str | None = None) -> None:
         self.calls.append(("base_url", base_url))
+        self.calls.append(("gateway_bearer_token_configured", bearer_token is not None))
+        if self.expected_bearer_token is not None:
+            assert bearer_token == self.expected_bearer_token
 
     async def get_market_snapshot(self, symbol: str, market: str) -> GatewayResult:
         self.calls.append(("snapshot", symbol, market))
         if self.fail_snapshot:
-            return GatewayResult(error="stock-data-gateway request failed for /v1/market-snapshot")
+            return GatewayResult(error=self.snapshot_error)
         data: dict[str, Any] = {
             "company": {
                 "symbol": symbol,
@@ -68,7 +74,9 @@ class StubGatewayClient:
 def setup_function() -> None:
     StubGatewayClient.calls = []
     StubGatewayClient.fail_snapshot = False
+    StubGatewayClient.snapshot_error = "stock-data-gateway request failed for /v1/market-snapshot"
     StubGatewayClient.omit_valuation = False
+    StubGatewayClient.expected_bearer_token = None
 
 
 def test_nasdaq_score_uses_gateway_market_snapshot(monkeypatch: Any) -> None:
@@ -99,6 +107,60 @@ def test_nasdaq_score_uses_gateway_market_snapshot(monkeypatch: Any) -> None:
         "hard_fail",
         "final_label",
     }
+
+
+def test_score_passes_configured_bearer_token_to_gateway_client(monkeypatch: Any) -> None:
+    StubGatewayClient.expected_bearer_token = "configured-test-token"
+    monkeypatch.setattr(score, "GatewayClient", StubGatewayClient)
+    monkeypatch.setattr(
+        score,
+        "get_settings",
+        lambda: SimpleNamespace(
+            stock_data_gateway_url="https://gateway.example",
+            stock_data_gateway_bearer_token="configured-test-token",
+        ),
+    )
+
+    response = client.post("/score/NASDAQ/AAPL")
+
+    assert response.status_code == 200
+    assert ("gateway_bearer_token_configured", True) in StubGatewayClient.calls
+
+
+def test_gateway_auth_failure_returns_sanitized_flag_and_note(monkeypatch: Any) -> None:
+    StubGatewayClient.fail_snapshot = True
+    StubGatewayClient.snapshot_error = "gateway_auth_failed"
+    monkeypatch.setattr(score, "GatewayClient", StubGatewayClient)
+
+    response = client.post("/score/NASDAQ/AAPL")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "gateway_auth_failed" in body["risk_flags"]
+    assert "stock-data-gateway authorization failed" in body["data_basis"]["notes"]
+    assert set(body) == {
+        "company",
+        "data_basis",
+        "metrics",
+        "valuation",
+        "scores",
+        "risk_flags",
+        "hard_fail",
+        "final_label",
+    }
+
+
+def test_missing_gateway_token_returns_sanitized_auth_failure(monkeypatch: Any) -> None:
+    StubGatewayClient.fail_snapshot = True
+    StubGatewayClient.snapshot_error = "gateway_auth_missing"
+    monkeypatch.setattr(score, "GatewayClient", StubGatewayClient)
+
+    response = client.post("/score/NASDAQ/AAPL")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "gateway_auth_failed" in body["risk_flags"]
+    assert "stock-data-gateway authorization is not configured" in body["data_basis"]["notes"]
 
 
 def test_gateway_failure_returns_partial_result(monkeypatch: Any) -> None:

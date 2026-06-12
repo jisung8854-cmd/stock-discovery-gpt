@@ -3,8 +3,6 @@ from typing import Any
 
 import httpx
 
-from app.core.config import get_settings
-
 
 @dataclass(frozen=True)
 class GatewayResult:
@@ -33,12 +31,13 @@ class GatewayClient:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.transport = transport
-        configured_token = (
-            bearer_token
-            if bearer_token is not None
-            else get_settings().stock_data_gateway_bearer_token
-        )
-        self.bearer_token = configured_token.strip() if configured_token else None
+        normalized_token = bearer_token.strip() if bearer_token else ""
+        self.bearer_token = normalized_token or None
+
+    @property
+    def gateway_bearer_token_configured(self) -> bool:
+        """Report credential presence without exposing the credential value."""
+        return self.bearer_token is not None
 
     async def get_market_snapshot(self, symbol: str, market: str) -> GatewayResult:
         return await self._request(
