@@ -78,6 +78,10 @@ API 문서 확인:
 - `ratios/{ticker}`
 - `quote/{ticker}`
 
+`POST /v1/market-snapshot`은 미국 상장 종목의 `quote`/`profile` 기본 데이터와 최신 `key-metrics` 항목을 조합해 시세, 기업 정보, 밸류에이션, 수익성, 유동성, 현금흐름 지표를 정규화합니다. `key-metrics` 배열에서는 날짜가 가장 최신인 항목을 사용하고, 같은 날짜에서는 `FY` 또는 `TTM` 기간을 우선합니다.
+
+FMP 플랜에 따라 `key-metrics`, ratios 또는 financial statement endpoint가 제한될 수 있습니다. 일부 상세 endpoint가 실패하거나 빈 데이터를 반환해도 `/v1/market-snapshot`은 quote/profile 기반 partial data를 반환하고, 상세 지표는 `null`, `notes`에는 `key_metrics_unavailable` 같은 안전한 상태를 기록하며 `data_reliability`를 낮춥니다. API 키나 인증 토큰은 응답과 note에 포함하지 않습니다.
+
 하나의 FMP 엔드포인트가 실패해도 전체 응답은 중단되지 않습니다. 가능한 데이터로 내부 스키마를 채우고, 실패한 엔드포인트는 `data_basis.notes`에 기록하며 `data_basis.reliability`를 낮춥니다. `FMP_API_KEY`가 없으면 기존 mock 응답을 반환하므로 로컬 개발 중 API 키를 요구하지 않습니다.
 
 ## DART 한국 주식 데이터 설정
