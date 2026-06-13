@@ -106,7 +106,7 @@ def _build_gateway_score(
             notes.append(result.error or "stock-data-gateway unavailable")
         reliability = 0.2
     else:
-        reliability = 0.85
+        reliability = _gateway_data_reliability(raw)
         if endpoint_failures:
             risk_flags.extend(["partial_gateway_data", provider_flag])
             notes.append(f"{endpoint_failures} stock-data-gateway endpoint(s) unavailable.")
@@ -162,6 +162,33 @@ def _build_gateway_score(
         hard_fail=hard_fail,
         final_label=final_label,
     )
+
+
+def _gateway_data_reliability(raw: dict[str, Any]) -> float:
+    payload = raw.get("data") if isinstance(raw.get("data"), dict) else raw
+    nested = [
+        value
+        for key in ("metrics", "financial_metrics", "financials", "valuation", "valuation_metrics")
+        if isinstance((value := payload.get(key)), dict)
+    ]
+    available = {
+        key
+        for source in [payload, *nested]
+        for key, value in source.items()
+        if value is not None
+    }
+    valuation = available & {
+        "fcf_yield", "earnings_yield", "ev_to_sales", "ev_to_free_cash_flow", "ev_to_ebitda",
+    }
+    profitability = available & {"roe", "roic", "return_on_assets"}
+    liquidity = available & {"current_ratio", "net_debt_to_ebitda"}
+    if valuation and profitability and liquidity:
+        return 0.7
+    if valuation and profitability:
+        return 0.65
+    if valuation:
+        return 0.6
+    return 0.45
 
 
 def _has_basic_company_data(

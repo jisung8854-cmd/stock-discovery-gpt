@@ -291,8 +291,20 @@ def calculate_gateway_metrics(
     """Extract gateway-normalized metrics without inventing unavailable financial data."""
     raw = raw or {}
     payload = raw.get("data") if isinstance(raw.get("data"), dict) else raw
-    metrics_raw = _first_mapping(payload, "metrics", "financial_metrics", "financials")
-    valuation_raw = _first_mapping(payload, "valuation", "valuation_metrics")
+    metrics_raw = {
+        **_direct_fields(payload, FinancialMetrics.model_fields),
+        **_first_mapping(payload, "metrics", "financial_metrics", "financials"),
+    }
+    valuation_raw = {
+        **_direct_fields(payload, ValuationMetrics.model_fields),
+        **_first_mapping(payload, "valuation", "valuation_metrics"),
+    }
+    # Gateway snapshot fields use these names, while the public score schema
+    # retains its existing backward-compatible names.
+    if "return_on_invested_capital" not in metrics_raw and "roic" in metrics_raw:
+        metrics_raw["return_on_invested_capital"] = metrics_raw["roic"]
+    if "free_cash_flow_margin" not in metrics_raw and "fcf_margin" in metrics_raw:
+        metrics_raw["free_cash_flow_margin"] = metrics_raw["fcf_margin"]
     metric_fields = FinancialMetrics.model_fields
     valuation_fields = ValuationMetrics.model_fields
     metrics = FinancialMetrics(
@@ -301,7 +313,22 @@ def calculate_gateway_metrics(
     valuation = ValuationMetrics(
         **{key: value for key, value in valuation_raw.items() if key in valuation_fields}
     )
-    return metrics, valuation, bool(metrics_raw), bool(valuation_raw)
+    financial_signal_fields = {
+        "roe", "roic", "current_ratio", "net_debt_to_ebitda", "return_on_assets",
+    }
+    valuation_signal_fields = {
+        "fcf_yield", "earnings_yield", "ev_to_sales", "ev_to_free_cash_flow",
+        "ev_to_ebitda",
+    }
+    available = {key for key, value in payload.items() if value is not None}
+    available.update(key for key, value in metrics_raw.items() if value is not None)
+    available.update(key for key, value in valuation_raw.items() if value is not None)
+    return (
+        metrics,
+        valuation,
+        bool(available & financial_signal_fields),
+        bool(available & valuation_signal_fields),
+    )
 
 
 def _first_mapping(source: dict[str, Any], *keys: str) -> dict[str, Any]:
@@ -310,3 +337,7 @@ def _first_mapping(source: dict[str, Any], *keys: str) -> dict[str, Any]:
         if isinstance(value, dict):
             return value
     return {}
+
+
+def _direct_fields(source: dict[str, Any], fields: Any) -> dict[str, Any]:
+    return {key: source[key] for key in fields if source.get(key) is not None}

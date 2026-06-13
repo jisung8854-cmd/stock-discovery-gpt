@@ -234,11 +234,11 @@ class ScoringEngine:
             return FinalLabel.REJECT
 
         price_score = pas if price_attractiveness_score is None else price_attractiveness_score
-        if total_score >= 85 and bqs >= 85 and pas >= 70:
+        if total_score >= 80 and bqs >= 80 and pas >= 70 and data_reliability >= 0.75:
             label = FinalLabel.ELITE_CANDIDATE
-        elif total_score >= 70:
+        elif total_score >= 70 and data_reliability >= 0.65:
             label = FinalLabel.STRONG_CANDIDATE
-        elif total_score >= 55:
+        elif total_score >= 60:
             label = FinalLabel.WATCHLIST
         else:
             label = FinalLabel.REJECT
