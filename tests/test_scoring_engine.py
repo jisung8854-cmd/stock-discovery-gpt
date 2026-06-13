@@ -183,3 +183,22 @@ def test_low_data_reliability_cannot_be_elite() -> None:
     )
 
     assert label == FinalLabel.WATCHLIST
+
+
+def test_detailed_snapshot_metrics_change_each_composite_score() -> None:
+    engine = ScoringEngine()
+    modules = engine.calculate_modules(
+        FinancialMetrics(
+            fcf_yield=0.06,
+            roic=0.22,
+            roe=0.28,
+            current_ratio=1.8,
+            net_debt_to_ebitda=0.4,
+            capex_to_revenue=0.05,
+        ),
+        ValuationMetrics(ev_to_ebitda=12),
+    )
+    scores = engine.calculate(modules)
+
+    assert scores.total_score != 50
+    assert all(getattr(scores, key) != 50 for key in ("BQS", "PAS", "VDS", "EES"))

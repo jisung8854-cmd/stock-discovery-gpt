@@ -15,6 +15,7 @@ class StubGatewayClient:
     fail_snapshot = False
     snapshot_error = "stock-data-gateway request failed for /v1/market-snapshot"
     omit_valuation = False
+    direct_snapshot = False
     expected_bearer_token: str | None = None
 
     def __init__(self, base_url: str, bearer_token: str | None = None) -> None:
@@ -27,6 +28,21 @@ class StubGatewayClient:
         self.calls.append(("snapshot", symbol, market))
         if self.fail_snapshot:
             return GatewayResult(error=self.snapshot_error)
+        if self.direct_snapshot:
+            return GatewayResult(data={
+                "ticker": symbol,
+                "name": "NVIDIA Corporation",
+                "price": 140.0,
+                "market_cap": 3_400_000_000_000,
+                "enterprise_value": 3_300_000_000_000,
+                "fcf_yield": 0.045,
+                "ev_to_ebitda": 28.0,
+                "roe": 0.75,
+                "roic": 0.55,
+                "current_ratio": 3.5,
+                "net_debt_to_ebitda": 0.1,
+                "capex_to_revenue": 0.04,
+            })
         data: dict[str, Any] = {
             "company": {
                 "symbol": symbol,
@@ -76,6 +92,7 @@ def setup_function() -> None:
     StubGatewayClient.fail_snapshot = False
     StubGatewayClient.snapshot_error = "stock-data-gateway request failed for /v1/market-snapshot"
     StubGatewayClient.omit_valuation = False
+    StubGatewayClient.direct_snapshot = False
     StubGatewayClient.expected_bearer_token = None
 
 
@@ -94,7 +111,7 @@ def test_nasdaq_score_uses_gateway_market_snapshot(monkeypatch: Any) -> None:
     assert body["data_basis"] == {
         "source": "stock-data-gateway",
         "is_mock": False,
-        "reliability": 0.85,
+        "reliability": 0.7,
         "notes": [],
     }
     assert set(body) == {
@@ -179,7 +196,7 @@ def test_gateway_failure_returns_partial_result(monkeypatch: Any) -> None:
     assert body["final_label"] != "elite_candidate"
 
 
-def test_missing_valuation_is_partial_but_not_hard_fail_or_elite(monkeypatch: Any) -> None:
+def test_valuation_signal_in_metrics_prevents_missing_flag(monkeypatch: Any) -> None:
     StubGatewayClient.omit_valuation = True
     monkeypatch.setattr(score, "GatewayClient", StubGatewayClient)
 
@@ -187,11 +204,33 @@ def test_missing_valuation_is_partial_but_not_hard_fail_or_elite(monkeypatch: An
 
     assert response.status_code == 200
     body = response.json()
-    assert body["data_basis"]["reliability"] == 0.45
-    assert "valuation_data_missing" in body["risk_flags"]
-    assert "low_data_reliability" in body["risk_flags"]
+    assert body["data_basis"]["reliability"] == 0.7
+    assert "valuation_data_missing" not in body["risk_flags"]
+    assert "low_data_reliability" not in body["risk_flags"]
     assert body["hard_fail"] is False
     assert body["final_label"] != "elite_candidate"
+
+
+def test_direct_snapshot_metrics_drive_scores_flags_and_identity(monkeypatch: Any) -> None:
+    StubGatewayClient.direct_snapshot = True
+    monkeypatch.setattr(score, "GatewayClient", StubGatewayClient)
+
+    body = client.post("/score/NASDAQ/NVDA").json()
+
+    assert body["company"]["ticker"] == "NVDA"
+    assert body["company"]["name"] == "NVIDIA Corporation"
+    assert "AAPL" not in str(body)
+    assert body["metrics"]["fcf_yield"] == 0.045
+    assert body["metrics"]["roe"] == 0.75
+    assert body["metrics"]["roic"] == 0.55
+    assert body["metrics"]["current_ratio"] == 3.5
+    assert body["valuation"]["ev_to_ebitda"] == 28.0
+    assert "financial_metrics_missing" not in body["risk_flags"]
+    assert "valuation_data_missing" not in body["risk_flags"]
+    assert "low_data_reliability" not in body["risk_flags"]
+    assert body["data_basis"]["reliability"] >= 0.7
+    assert body["scores"]["total_score"] != 50.0
+    assert all(body["scores"][key] != 50.0 for key in ("BQS", "PAS", "VDS", "EES"))
 
 
 def test_korean_stock_code_loads_mocked_company_and_disclosures(monkeypatch: Any) -> None:

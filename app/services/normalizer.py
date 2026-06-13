@@ -79,14 +79,20 @@ def normalize_gateway_company(
     company = _nested_dict(payload, "company", "profile")
     quote = _nested_dict(payload, "quote", "market_data", "snapshot")
     sources = (company, quote, payload, raw)
-    normalized_ticker = _first_value(*sources, keys=("ticker", "symbol", "stock_code")) or ticker
+    returned_ticker = _first_value(*sources, keys=("ticker", "symbol", "stock_code"))
+    normalized_ticker = ticker.upper()
+    identity_matches = returned_ticker is None or str(returned_ticker).upper() == normalized_ticker
     market_cap = _first_number(*sources, keys=("market_cap", "marketCap", "mktCap"))
     price = _first_number(*sources, keys=("price", "current_price", "currentPrice"))
     return CompanySummary(
         ticker=str(normalized_ticker).upper(),
         market=market,
         name=str(
-            _first_value(*sources, keys=("name", "company_name", "companyName", "corp_name"))
+            (
+                _first_value(*sources, keys=("name", "company_name", "companyName", "corp_name"))
+                if identity_matches
+                else None
+            )
             or normalized_ticker
         ),
         sector=_optional_string(_first_value(*sources, keys=("sector",))),
